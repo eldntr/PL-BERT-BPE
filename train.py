@@ -119,7 +119,8 @@ def train():
     ).to(device)
     
     # Wrap model dengan DDP
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+    # find_unused_parameters=True diperlukan karena model memiliki multiple output heads
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
