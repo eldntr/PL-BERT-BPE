@@ -74,10 +74,12 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    for w in words:
+    for i, w in enumerate(words):
+        
+        _w = " " + w if i > 0 else w
 
         # ----- BPE -----
-        bpe_ids = text_tokenizer.encode_word(w)
+        bpe_ids = text_tokenizer.encode_word(_w)
         if len(bpe_ids) == 0:
             continue
 
