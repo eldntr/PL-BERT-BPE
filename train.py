@@ -128,6 +128,104 @@ def cleanup_ddp():
     """Cleanup DDP"""
     dist.destroy_process_group()
 
+def evaluate(model, val_loader, device, ctc_loss_fn, mlm_prob, world_size):
+    """Evaluate model on validation set"""
+    model.eval()
+    
+    total_loss = 0.0
+    total_mlm_loss = 0.0
+    total_ctc_loss = 0.0
+    total_mlm_acc = 0.0
+    total_wer = 0.0
+    total_f1 = 0.0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in val_loader:
+            phoneme_input = batch["phoneme_input"].to(device)
+            mlm_labels = batch["mlm_labels"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            ctc_targets = batch["ctc_targets"].to(device)
+            input_lengths = batch["input_lengths"].to(device)
+            target_lengths = batch["target_lengths"].to(device)
+            
+            mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
+            
+            # MLM Loss
+            B, T, Vp = mlm_logits.shape
+            mlm_loss = F.cross_entropy(
+                mlm_logits.view(B*T, Vp),
+                mlm_labels.view(B*T),
+                ignore_index=-100
+            )
+            
+            # CTC Loss
+            ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)
+            ctc_targets_shifted = ctc_targets + 1
+            ctc_loss = ctc_loss_fn(
+                ctc_log_probs,
+                ctc_targets_shifted,
+                input_lengths,
+                target_lengths
+            )
+            
+            loss = mlm_loss + ctc_loss
+            
+            # Metrics
+            mlm_acc = calculate_mlm_accuracy(mlm_logits, mlm_labels)
+            f1 = calculate_f1_score(mlm_logits, mlm_labels)
+            ctc_pred = ctc_logits.argmax(dim=-1)
+            wer = calculate_wer(ctc_pred, ctc_targets, target_lengths)
+            
+            total_loss += loss.item()
+            total_mlm_loss += mlm_loss.item()
+            total_ctc_loss += ctc_loss.item()
+            total_mlm_acc += mlm_acc
+            total_wer += wer
+            total_f1 += f1
+            num_batches += 1
+            
+            # Limit validation to 100 batches for speed
+            if num_batches >= 100:
+                break
+    
+    model.train()
+    
+    # Average metrics
+    avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+    avg_mlm_loss = total_mlm_loss / num_batches if num_batches > 0 else 0.0
+    avg_ctc_loss = total_ctc_loss / num_batches if num_batches > 0 else 0.0
+    avg_mlm_acc = total_mlm_acc / num_batches if num_batches > 0 else 0.0
+    avg_wer = total_wer / num_batches if num_batches > 0 else 0.0
+    avg_f1 = total_f1 / num_batches if num_batches > 0 else 0.0
+    
+    # Aggregate across GPUs
+    if world_size > 1:
+        metrics_tensor = torch.tensor([
+            avg_loss, avg_mlm_loss, avg_ctc_loss,
+            avg_mlm_acc, avg_wer, avg_f1
+        ], device=device)
+        dist.all_reduce(metrics_tensor, op=dist.ReduceOp.SUM)
+        metrics_tensor /= world_size
+        
+        return {
+            "loss": metrics_tensor[0].item(),
+            "mlm_loss": metrics_tensor[1].item(),
+            "ctc_loss": metrics_tensor[2].item(),
+            "mlm_accuracy": metrics_tensor[3].item(),
+            "wer": metrics_tensor[4].item(),
+            "f1_score": metrics_tensor[5].item(),
+        }
+    else:
+        return {
+            "loss": avg_loss,
+            "mlm_loss": avg_mlm_loss,
+            "ctc_loss": avg_ctc_loss,
+            "mlm_accuracy": avg_mlm_acc,
+            "wer": avg_wer,
+            "f1_score": avg_f1,
+        }
+
 def train():
     # ---------- DDP SETUP ----------
     local_rank = setup_ddp()
@@ -138,8 +236,9 @@ def train():
         print(f"🚀 Training with {world_size} GPUs (DDP)")
     
     # ---------- PATH & PARAM ----------
-    dataset_path = "wiki_phoneme_final"
-    phoneme_vocab_path = "./wiki_phoneme/phoneme_vocab.json"
+    train_dataset_path = "wiki_phoneme_train"
+    val_dataset_path = "wiki_phoneme_val"
+    phoneme_vocab_path = "phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
     # Batch size per GPU - total effective batch = batch_size * world_size
@@ -147,6 +246,7 @@ def train():
     batch_size = 1
     max_steps = 1_000_000  # 1 juta step
     save_every = 10_000    # simpan setiap 10rb step
+    eval_every = 1_000    # evaluasi setiap 10rb step
     lr = 1e-4
     mlm_prob = 0.15
     lambda_ctc = 1.0
@@ -160,7 +260,7 @@ def train():
         log_dir = "training_logs"
         os.makedirs(log_dir, exist_ok=True)
         
-        # CSV file untuk menyimpan semua metrik
+        # CSV file untuk menyimpan semua metrik training
         log_file = os.path.join(log_dir, f"training_metrics_{timestamp}.csv")
         log_writer = open(log_file, 'w', newline='')
         csv_writer = csv.writer(log_writer)
@@ -169,10 +269,22 @@ def train():
             "mlm_accuracy", "wer", "f1_score", "learning_rate"
         ])
         
-        print(f"📊 Logging metrics to: {log_file}")
+        # CSV file untuk validation metrics
+        val_log_file = os.path.join(log_dir, f"validation_metrics_{timestamp}.csv")
+        val_log_writer = open(val_log_file, 'w', newline='')
+        val_csv_writer = csv.writer(val_log_writer)
+        val_csv_writer.writerow([
+            "step", "val_loss", "val_mlm_loss", "val_ctc_loss",
+            "val_mlm_accuracy", "val_wer", "val_f1_score"
+        ])
+        
+        print(f"📊 Logging training metrics to: {log_file}")
+        print(f"📊 Logging validation metrics to: {val_log_file}")
     else:
         log_writer = None
         csv_writer = None
+        val_log_writer = None
+        val_csv_writer = None
     
     if is_main_process:
         print(f"Per-GPU batch size: {batch_size}")
@@ -192,12 +304,20 @@ def train():
 
     # ---------- LOAD DATASET ----------
     if is_main_process:
-        print("Loading dataset from", dataset_path)
-    hf_dataset = load_from_disk(dataset_path)
+        print("Loading training dataset from", train_dataset_path)
+    train_hf_dataset = load_from_disk(train_dataset_path)
     if is_main_process:
-        print("Dataset size:", len(hf_dataset))
+        print("Training dataset size:", len(train_hf_dataset))
 
-    dataset = FilePathDataset(hf_dataset, phoneme_tokenizer, mlm_prob=mlm_prob)
+    # Load validation dataset
+    if is_main_process:
+        print("Loading validation dataset from", val_dataset_path)
+    val_hf_dataset = load_from_disk(val_dataset_path)
+    if is_main_process:
+        print("Validation dataset size:", len(val_hf_dataset))
+
+    dataset = FilePathDataset(train_hf_dataset, phoneme_tokenizer, mlm_prob=mlm_prob)
+    val_dataset = FilePathDataset(val_hf_dataset, phoneme_tokenizer, mlm_prob=mlm_prob)
 
     # Gunakan DistributedSampler untuk DDP (bukan LengthBucketSampler)
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
@@ -214,6 +334,16 @@ def train():
         batch_size=batch_size,
         sampler=sampler,
         num_workers=4,
+        collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
+        pin_memory=True
+    )
+    
+    # Validation DataLoader (no DistributedSampler needed, just sample randomly)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size * 2,  # Can use larger batch for eval
+        shuffle=False,
+        num_workers=2,
         collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
         pin_memory=True
     )
@@ -347,7 +477,38 @@ def train():
                     ])
                     log_writer.flush()  # Ensure data is written immediately
 
-            # Simpan checkpoint setiap 100rb step (hanya main process)
+            # Evaluasi pada validation set
+            if global_step % eval_every == 0:
+                if is_main_process:
+                    print(f"\n{'='*80}")
+                    print(f"🔍 Running validation at step {global_step}...")
+                    print(f"{'='*80}")
+                
+                val_metrics = evaluate(model, val_loader, device, ctc_loss_fn, mlm_prob, world_size)
+                
+                if is_main_process:
+                    print(f"Validation Results:")
+                    print(f"  Loss: {val_metrics['loss']:.4f}")
+                    print(f"  MLM Loss: {val_metrics['mlm_loss']:.4f}")
+                    print(f"  CTC Loss: {val_metrics['ctc_loss']:.4f}")
+                    print(f"  MLM Accuracy: {val_metrics['mlm_accuracy']:.4f}")
+                    print(f"  WER: {val_metrics['wer']:.4f}")
+                    print(f"  F1 Score: {val_metrics['f1_score']:.4f}")
+                    print(f"{'='*80}\n")
+                    
+                    # Write validation metrics to CSV
+                    val_csv_writer.writerow([
+                        global_step,
+                        val_metrics['loss'],
+                        val_metrics['mlm_loss'],
+                        val_metrics['ctc_loss'],
+                        val_metrics['mlm_accuracy'],
+                        val_metrics['wer'],
+                        val_metrics['f1_score']
+                    ])
+                    val_log_writer.flush()
+
+            # Simpan checkpoint setiap 10rb step (hanya main process)
             if is_main_process and global_step % save_every == 0:
                 ckpt_path = f"checkpoint_step_{global_step}.pt"
                 torch.save({
@@ -367,10 +528,13 @@ def train():
         }, final_ckpt_path)
         print(f"✓ Training complete! Final checkpoint saved to {final_ckpt_path}")
         
-        # Close log file
+        # Close log files
         if log_writer:
             log_writer.close()
-            print(f"✓ Training logs saved to {log_file}")
+            print(f"✓ Training logs saved")
+        if val_log_writer:
+            val_log_writer.close()
+            print(f"✓ Validation logs saved")
     
     # Cleanup DDP
     cleanup_ddp()

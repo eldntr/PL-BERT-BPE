@@ -105,14 +105,39 @@ print(f"Total phonemes in vocab: {phoneme_tokenizer.vocab_size}")
 # -----------------------------------------------------------------
 # Save phoneme vocab
 # -----------------------------------------------------------------
-phoneme_tokenizer.save(f"{root}/phoneme_vocab.json")
-print("Saved phoneme vocab to", f"{root}/phoneme_vocab.json")
+phoneme_tokenizer.save(f"phoneme_vocab.json")
+print("Saved phoneme vocab to", f"phoneme_vocab.json")
 
 # Note: phoneme_ids will be generated on-the-fly in the dataloader
 # This prevents ID collision issues from multiprocessing
 
 # -----------------------------------------------------------------
-# Save dataset
+# Split dataset: Train / Validation / Test
 # -----------------------------------------------------------------
+print(f"Total dataset size: {len(dataset)}")
+
+# Split: 98% train, 1% validation, 1% test
+train_test_split = dataset.train_test_split(test_size=0.02, seed=42)
+train_dataset = train_test_split["train"]
+val_test_split = train_test_split["test"].train_test_split(test_size=0.5, seed=42)
+val_dataset = val_test_split["train"]
+test_dataset = val_test_split["test"]
+
+print(f"Train size: {len(train_dataset)}")
+print(f"Validation size: {len(val_dataset)}")
+print(f"Test size: {len(test_dataset)}")
+
+# -----------------------------------------------------------------
+# Save dataset splits
+# -----------------------------------------------------------------
+train_dataset.save_to_disk("wiki_phoneme_train")
+val_dataset.save_to_disk("wiki_phoneme_val")
+test_dataset.save_to_disk("wiki_phoneme_test")
+
+print("Saved train dataset to wiki_phoneme_train")
+print("Saved validation dataset to wiki_phoneme_val")
+print("Saved test dataset to wiki_phoneme_test")
+
+# Also save the full dataset for backward compatibility
 dataset.save_to_disk("wiki_phoneme_final")
-print("Saved dataset to wiki_phoneme_final")
+print("Saved full dataset to wiki_phoneme_final")
