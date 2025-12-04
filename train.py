@@ -47,20 +47,28 @@ def calculate_wer(pred_ids, target_ids, target_lengths):
         prev = None
         for token in pred_seq:
             if token != 0 and token != prev:  # 0 is blank
-                decoded.append(token)
+                # PERBAIKAN: Kurangi 1 karena model memprediksi (id + 1)
+                # Pastikan tidak menjadi negatif jika model memprediksi 0 (blank)
+                actual_token_id = token - 1
+                if actual_token_id >= 0:
+                    decoded.append(actual_token_id)
             prev = token
         return decoded
     
     total_distance = 0
     total_length = 0
     
+    # PERBAIKAN: target_ids adalah tensor yang di-flatten, 
+    # kita perlu memproses dengan benar untuk setiap batch item
+    target_offset = 0
+    
     for pred, target_len in zip(pred_ids, target_lengths):
         # Decode CTC output
         pred_decoded = decode_ctc(pred.tolist())
         
-        # Get actual target (extract from flattened target_ids)
-        target_decoded = target_ids[:target_len].tolist()
-        target_ids = target_ids[target_len:]  # Remove processed part
+        # PERBAIKAN: Ekstrak target yang benar menggunakan offset
+        target_decoded = target_ids[target_offset:target_offset + target_len].tolist()
+        target_offset += target_len  # Update offset untuk item berikutnya
         
         # Calculate Levenshtein distance
         distance = levenshtein_distance(pred_decoded, target_decoded)
@@ -243,7 +251,7 @@ def train():
 
     # Batch size per GPU - total effective batch = batch_size * world_size
     # Dengan 4 GPU & batch_size=192: effective batch = 192 * 4 = 768
-    batch_size = 1
+    batch_size = 4
     max_steps = 1_000_000  # 1 juta step
     save_every = 10_000    # simpan setiap 10rb step
     eval_every = 1_000    # evaluasi setiap 10rb step
