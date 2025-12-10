@@ -4,7 +4,7 @@ import warnings
 from functools import lru_cache
 
 from lingua import Language, LanguageDetectorBuilder
-
+# from text_normalize import normalize_text
 from phoneme_tokenizer import PhonemeTokenizer
 from text_normalize import normalize_text
 
@@ -48,9 +48,15 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
 
 
 def phonemize(text, text_tokenizer, phoneme_tokenizer):
+    """
+    text_tokenizer: instance TextTokenizer
+    phoneme_tokenizer: instance PhonemeTokenizer
+    """
+
     normalized = normalize_text(text)
     words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized)
 
+    # Skip if more than 50 words
     if len(words) > 50:
         return {
             "before": text,
@@ -68,24 +74,14 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    # --- PRECOMPUTE SPACE TOKEN ---
-    try:
-        # encode spasi sebagai token
-        space_token = text_tokenizer.encode_word(" ")
-        space_token_id = space_token[0] if len(space_token) > 0 else None
-    except:
-        space_token_id = None
-
     for i, w in enumerate(words):
+        
+        _w = " " + w if i > 0 else w
 
-        # BPE encode normal (tanpa manipulasi spasi)
-        bpe_ids = text_tokenizer.encode_word(w)
+        # ----- BPE -----
+        bpe_ids = text_tokenizer.encode_word(_w)
         if len(bpe_ids) == 0:
             continue
-
-        # ----- Tambahkan spasi antar kata sebagai token -----
-        if i > 0 and space_token_id is not None:
-            bpe_ids = [space_token_id] + bpe_ids
 
         # ----- PHONEME -----
         phon_str = phonemize_word_espeak(w, ipa=True, keep_stress=False, sep=" ")
@@ -100,46 +96,10 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
 
 if __name__ == "__main__":
     from text_tokenizer import TextTokenizer
-    from phoneme_tokenizer import PhonemeTokenizer
 
-    print("Loading tokenizers...")
     text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
     phoneme_tokenizer = PhonemeTokenizer()
-    
-    # Test cases
-    test_texts = [
-        "Hello world",
-        "Hello world, this is a test.",
-        "Saya suka makan nasi goreng.",
-        "I love programming in Python.",
-        "Ini adalah campuran bahasa Indonesia dan English words.",
-    ]
-    
-    print("\n" + "="*60)
-    print("Testing phonemize() function")
-    print("="*60 + "\n")
-    
-    for i, text in enumerate(test_texts, 1):
-        print(f"Test {i}: {text}")
-        print("-" * 60)
-        
-        result = phonemize(text, text_tokenizer, phoneme_tokenizer)
-        
-        print(f"Before: {result['before']}")
-        print(f"After:  {result['after']}")
-        print(f"Words:  {result['words']}")
-        print(f"Phonemes: {result['phonemes']}")
-        print(f"BPE IDs: {result['bpe_ids']}")
 
-        print("\nDecoded BPE tokens (per word):")
-        for j, (word, bpe_ids) in enumerate(zip(result['words'], result['bpe_ids'])):
-            decoded = text_tokenizer.decode(bpe_ids)
-            print(f"  Word {j+1}: '{word}' -> IDs {bpe_ids} -> Decoded: '{decoded}'")
-
-        print("\nDecoded full sentence from all BPE IDs:")
-        all_bpe_ids = [bpe_id for bpe_ids in result['bpe_ids'] for bpe_id in bpe_ids]
-        full_decoded = text_tokenizer.decode(all_bpe_ids)
-        print(f"  All IDs: {all_bpe_ids}")
-        print(f"  Decoded: '{full_decoded}'")
-        
-        print()
+    sample_text = "Halo dunia"
+    result = phonemize(sample_text, text_tokenizer, phoneme_tokenizer) # ['Ġdun', 'ia']
+    print(result)
