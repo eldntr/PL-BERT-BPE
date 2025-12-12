@@ -269,6 +269,9 @@ def train():
     mlm_prob = 0.15
     lambda_ctc = 1.0
     log_every = 100
+    
+    # Resume training dari checkpoint (set None jika train from scratch)
+    resume_from_checkpoint = "checkpoint_step_90000.pt" # Contoh: "checkpoint_step_10000.pt"
 
     device = torch.device(f"cuda:{local_rank}")
     
@@ -390,6 +393,34 @@ def train():
     scaler = GradScaler(device="cuda")
 
     global_step = 0
+    
+    # ---------- RESUME FROM CHECKPOINT ----------
+    if resume_from_checkpoint and os.path.exists(resume_from_checkpoint):
+        if is_main_process:
+            print(f"📥 Loading checkpoint from {resume_from_checkpoint}")
+        
+        checkpoint = torch.load(resume_from_checkpoint, map_location=device)
+        
+        # Load model state
+        model.module.load_state_dict(checkpoint["model_state"])
+        
+        # Load optimizer state
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        
+        # Load global step
+        global_step = checkpoint.get("global_step", 0)
+        
+        # Load scaler state jika ada
+        if "scaler_state" in checkpoint:
+            scaler.load_state_dict(checkpoint["scaler_state"])
+        
+        if is_main_process:
+            print(f"✓ Resumed from step {global_step}")
+            print(f"✓ Will continue training to step {max_steps}")
+    elif resume_from_checkpoint:
+        if is_main_process:
+            print(f"⚠️  Checkpoint {resume_from_checkpoint} not found, starting from scratch")
+    
     model.train()
 
     # Training loop dengan step-based (bukan epoch-based)
@@ -557,6 +588,7 @@ def train():
                 torch.save({
                     "model_state": model.module.state_dict(),  # .module untuk unwrap DDP
                     "optimizer_state": optimizer.state_dict(),
+                    "scaler_state": scaler.state_dict(),  # Save GradScaler state
                     "global_step": global_step,
                 }, ckpt_path)
                 print(f"✓ Saved checkpoint to {ckpt_path}")
@@ -567,6 +599,7 @@ def train():
         torch.save({
             "model_state": model.module.state_dict(),  # .module untuk unwrap DDP
             "optimizer_state": optimizer.state_dict(),
+            "scaler_state": scaler.state_dict(),  # Save GradScaler state
             "global_step": global_step,
         }, final_ckpt_path)
         print(f"✓ Training complete! Final checkpoint saved to {final_ckpt_path}")
