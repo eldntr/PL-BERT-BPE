@@ -81,8 +81,8 @@ def predict(model, text, phoneme_tokenizer, text_tokenizer, device):
 if __name__ == "__main__":
     # Config
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    CHECKPOINT = "checkpoint_step_100000.pt"
-    PHONEME_VOCAB = "./wiki_phoneme/phoneme_vocab.json"
+    CHECKPOINT = "checkpoint_step_90000.pt"
+    PHONEME_VOCAB = "phoneme_vocab.json"
     TEXT_TOKENIZER = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
     text_tokenizer = TextTokenizer(TEXT_TOKENIZER)

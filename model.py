@@ -27,6 +27,10 @@ class MultiTaskModel(nn.Module):
         )
 
         self.encoder = AlbertModel(config)
+        
+        # Aktifkan Gradient Checkpointing untuk menghemat memori aktivasi (50-70%)
+        # Menggunakan enable_gradient_checkpointing() untuk kompatibilitas maksimal
+        self.encoder.enable_gradient_checkpointing()
 
         # MLM head: predict phoneme
         self.mlm_head = nn.Linear(hidden_size, phoneme_vocab_size)

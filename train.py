@@ -6,9 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 import csv
 
+# Set memory optimization environment variable
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.amp import autocast, GradScaler
 from torch.utils.data import Dataset, DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -216,7 +220,7 @@ def evaluate(model, val_loader, device, ctc_loss_fn, mlm_prob, world_size):
         dist.all_reduce(metrics_tensor, op=dist.ReduceOp.SUM)
         metrics_tensor /= world_size
         
-        return {
+        result = {
             "loss": metrics_tensor[0].item(),
             "mlm_loss": metrics_tensor[1].item(),
             "ctc_loss": metrics_tensor[2].item(),
@@ -225,7 +229,7 @@ def evaluate(model, val_loader, device, ctc_loss_fn, mlm_prob, world_size):
             "f1_score": metrics_tensor[5].item(),
         }
     else:
-        return {
+        result = {
             "loss": avg_loss,
             "mlm_loss": avg_mlm_loss,
             "ctc_loss": avg_ctc_loss,
@@ -233,6 +237,10 @@ def evaluate(model, val_loader, device, ctc_loss_fn, mlm_prob, world_size):
             "wer": avg_wer,
             "f1_score": avg_f1,
         }
+    
+    # Clear GPU cache after evaluation
+    torch.cuda.empty_cache()
+    return result
 
 def train():
     # ---------- DDP SETUP ----------
@@ -249,9 +257,11 @@ def train():
     phoneme_vocab_path = "phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
-    # Batch size per GPU - total effective batch = batch_size * world_size
-    # Dengan 4 GPU & batch_size=192: effective batch = 192 * 4 = 768
-    batch_size = 4
+    # Batch size per GPU - total effective batch = batch_size * world_size * accumulation_steps
+    # Dengan 2 GPU & batch_size=16 & accumulation_steps=4: 
+    # effective batch = 16 * 2 * 4 = 128
+    batch_size = 16
+    accumulation_steps = 4  # Gradient accumulation untuk menghemat VRAM
     max_steps = 1_000_000  # 1 juta step
     save_every = 10_000    # simpan setiap 10rb step
     eval_every = 1_000    # evaluasi setiap 10rb step
@@ -296,7 +306,8 @@ def train():
     
     if is_main_process:
         print(f"Per-GPU batch size: {batch_size}")
-        print(f"Total effective batch size: {batch_size * world_size}")
+        print(f"Gradient accumulation steps: {accumulation_steps}")
+        print(f"Total effective batch size: {batch_size * world_size * accumulation_steps}")
         print(f"Device: {device}")
 
     # ---------- LOAD TOKENIZERS ----------
@@ -349,7 +360,7 @@ def train():
     # Validation DataLoader (no DistributedSampler needed, just sample randomly)
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size * 2,  # Can use larger batch for eval
+        batch_size=batch_size,  # Use same batch size as training for memory efficiency
         shuffle=False,
         num_workers=2,
         collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
@@ -373,6 +384,10 @@ def train():
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+    
+    # Inisialisasi GradScaler untuk Mixed Precision Training (FP16)
+    # Gunakan torch.amp (bukan deprecated torch.cuda.amp)
+    scaler = GradScaler(device="cuda")
 
     global_step = 0
     model.train()
@@ -396,37 +411,54 @@ def train():
             input_lengths  = batch["input_lengths"].to(device)      # [B]
             target_lengths = batch["target_lengths"].to(device)     # [B]
 
-            optimizer.zero_grad()
+            # Forward pass dengan Mixed Precision (FP16)
+            with autocast(device_type="cuda", dtype=torch.float16):
+                mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
 
-            mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
+                # ----- MLM LOSS -----
+                B, T, Vp = mlm_logits.shape
+                mlm_loss = F.cross_entropy(
+                    mlm_logits.view(B*T, Vp),
+                    mlm_labels.view(B*T),
+                    ignore_index=-100
+                )
 
-            # ----- MLM LOSS -----
-            B, T, Vp = mlm_logits.shape
-            mlm_loss = F.cross_entropy(
-                mlm_logits.view(B*T, Vp),
-                mlm_labels.view(B*T),
-                ignore_index=-100
-            )
+                # ----- CTC LOSS -----
+                # CTC expects [T, B, C]
+                ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
 
-            # ----- CTC LOSS -----
-            # CTC expects [T, B, C]
-            ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
+                # Shift BPE ids by +1 (0 = blank)
+                ctc_targets_shifted = ctc_targets + 1
 
-            # Shift BPE ids by +1 (0 = blank)
-            ctc_targets_shifted = ctc_targets + 1
+                ctc_loss = ctc_loss_fn(
+                    ctc_log_probs,
+                    ctc_targets_shifted,
+                    input_lengths,
+                    target_lengths
+                )
 
-            ctc_loss = ctc_loss_fn(
-                ctc_log_probs,
-                ctc_targets_shifted,
-                input_lengths,
-                target_lengths
-            )
+                loss = mlm_loss + lambda_ctc * ctc_loss
+                
+                # Gradient Accumulation: bagi loss dengan accumulation steps
+                loss = loss / accumulation_steps
+            
+            # Backward pass dengan GradScaler
+            scaler.scale(loss).backward()
 
-            loss = mlm_loss + lambda_ctc * ctc_loss
-            loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            # Optimizer step hanya dilakukan setiap accumulation_steps
+            if (global_step + 1) % accumulation_steps == 0:
+                # Unscale gradient sebelum clip_grad_norm
+                scaler.unscale_(optimizer)
+                
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                
+                # Optimizer step dengan scaler
+                scaler.step(optimizer)
+                scaler.update()
+                
+                # Reset gradients
+                optimizer.zero_grad()
 
             # Calculate metrics setiap step (untuk logging)
             if global_step % log_every == 0:
@@ -444,8 +476,11 @@ def train():
                 # Gather metrics dari semua GPU (optional, untuk average across GPUs)
                 if world_size > 1:
                     # Convert to tensors for all_reduce
+                    # Kalikan loss dengan accumulation_steps untuk mendapatkan loss asli
                     metrics_tensor = torch.tensor([
-                        loss.item(), mlm_loss.item(), ctc_loss.item(),
+                        (loss * accumulation_steps).item(), 
+                        mlm_loss.item(), 
+                        ctc_loss.item(),
                         mlm_accuracy, wer, f1_score
                     ], device=device)
                     dist.all_reduce(metrics_tensor, op=dist.ReduceOp.SUM)
@@ -458,7 +493,7 @@ def train():
                     wer_avg = metrics_tensor[4].item()
                     f1_score_avg = metrics_tensor[5].item()
                 else:
-                    total_loss_avg = loss.item()
+                    total_loss_avg = (loss * accumulation_steps).item()
                     mlm_loss_avg = mlm_loss.item()
                     ctc_loss_avg = ctc_loss.item()
                     mlm_accuracy_avg = mlm_accuracy
