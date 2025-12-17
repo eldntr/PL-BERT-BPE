@@ -7,7 +7,8 @@ import torch
 from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
 
-from transformers import AdamW, AlbertConfig, AlbertModel
+from transformers import AlbertConfig, AlbertModel
+from torch.optim import AdamW
 from datasets import load_from_disk, DatasetDict
 import yaml
 import editdistance
