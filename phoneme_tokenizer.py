@@ -7,11 +7,12 @@ class PhonemeTokenizer:
                  phoneme2id=None,
                  pad_token="<pad>",
                  mask_token="<mask>",
-                 blank_token="<blank>"):
+                 blank_token="<blank>",
+                 space_token="<space>"):
 
         self.phoneme2id = phoneme2id or {}
 
-        for tok in [pad_token, mask_token, blank_token]:
+        for tok in [pad_token, mask_token, blank_token, space_token]:
             if tok not in self.phoneme2id:
                 self.phoneme2id[tok] = len(self.phoneme2id)
 
@@ -20,6 +21,7 @@ class PhonemeTokenizer:
         self.pad_id = self.phoneme2id[pad_token]
         self.mask_id = self.phoneme2id[mask_token]
         self.blank_id = self.phoneme2id[blank_token]
+        self.space_id = self.phoneme2id[space_token]
 
     # ----------------------------- SAVE/LOAD -----------------------------
     @classmethod
@@ -52,8 +54,13 @@ class PhonemeTokenizer:
         Contoh:
             "s a j a" → ["s","a","j","a"]
             "sajamakan" → ["s","a","j","a","m","a","k","a","n"]
+            "<space>" → ["<space>"]  (special token)
         """
         p_str = p_str.strip()
+        
+        # Check if it's a special token (starts and ends with < >)
+        if p_str.startswith("<") and p_str.endswith(">"):
+            return [p_str]
 
         if " " in p_str:
             return p_str.split()
