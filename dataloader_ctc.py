@@ -3,41 +3,47 @@ from torch.utils.data import Dataset, Sampler
 import random
 import numpy as np
 
+from text_tokenizer import TextCleaner
+
 class LengthBucketSampler(Sampler):
     """
-    Sampler yang mengelompokkan data berdasarkan panjang phoneme.
-    Mengurangi variansi sequence length dalam batch untuk CTC loss yang lebih stabil.
+    Bucket sampler berdasarkan PANJANG INPUT PHONEME SEBENARNYA
+    (setelah TextCleaner, termasuk spasi).
     """
     def __init__(self, dataset, batch_size, shuffle=True):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
         
-        # Hitung panjang phoneme untuk setiap sample
         print("Computing phoneme lengths for bucketing...")
         self.lengths = []
+
         for idx in range(len(dataset)):
             ex = dataset.dataset[idx]
-            # Hitung total panjang phoneme
-            total_len = sum(len(phon) for phon in ex["phonemes"])
+
+            phoneme_str = " ".join(ex["phonemes"])
+            phoneme_ids = dataset.text_cleaner(phoneme_str)
+
+            total_len = len(phoneme_ids)
             self.lengths.append((idx, total_len))
         
-        # Sort berdasarkan panjang
         self.lengths.sort(key=lambda x: x[1])
-        print(f"Bucketing complete! Min length: {self.lengths[0][1]}, Max length: {self.lengths[-1][1]}")
+        print(
+            f"Bucketing complete! "
+            f"Min length: {self.lengths[0][1]}, "
+            f"Max length: {self.lengths[-1][1]}"
+        )
     
     def __iter__(self):
-        # Ambil indices yang sudah sorted
         indices = [idx for idx, _ in self.lengths]
-        
-        # Buat batches dari indices yang sudah sorted
-        batches = [indices[i:i+self.batch_size] for i in range(0, len(indices), self.batch_size)]
-        
+        batches = [
+            indices[i:i + self.batch_size]
+            for i in range(0, len(indices), self.batch_size)
+        ]
+
         if self.shuffle:
-            # Shuffle urutan batches (tapi isi batch tetap sorted)
             random.shuffle(batches)
-        
-        # Flatten batches
+
         for batch in batches:
             for idx in batch:
                 yield idx
@@ -47,18 +53,10 @@ class LengthBucketSampler(Sampler):
 
 
 class FilePathDataset(Dataset):
-    def __init__(
-        self,
-        dataset,                   # HuggingFace dataset
-        phoneme_tokenizer,        # PhonemeTokenizer instance
-        mlm_prob=0.15,            # whole-word masking prob
-        mask_token_id=None,       # phoneme_tokenizer.mask_id
-    ):
+    def __init__(self, dataset):
         self.dataset = dataset
-        self.phoneme_tokenizer = phoneme_tokenizer
-        self.mlm_prob = mlm_prob
-        self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
-        self.pad_id = phoneme_tokenizer.pad_id
+        self.text_cleaner = TextCleaner()
+        self.pad_id = self.text_cleaner.word_index_dictionary["$"]
 
     def __len__(self):
         return len(self.dataset)
@@ -66,114 +64,92 @@ class FilePathDataset(Dataset):
     def __getitem__(self, idx):
         ex = self.dataset[idx]
 
-        # --- Extract ---
-        phoneme_words = ex["phonemes"]       # list of phoneme strings
-        bpe_words     = ex["bpe_ids"]        # list of list of bpe ids
+        # phoneme: ['həlˈoʊ', 'wˈɜːld', '!'] → "həlˈoʊ wˈɜːld !"
+        phoneme_str = " ".join(ex["phonemes"])
+        phoneme_ids = self.text_cleaner(phoneme_str)
 
-        # --- Encode phonemes to IDs on-the-fly ---
-        # This ensures consistent IDs with the final vocab
-        flat_phon = []
-        word_spans = []   # (start, end) indexes
-        curr = 0
-
-        for phoneme_str in phoneme_words:
-            phon_ids = self.phoneme_tokenizer.encode(phoneme_str)
-            start = curr
-            flat_phon.extend(phon_ids)
-            curr += len(phon_ids)
-            end = curr
-            word_spans.append((start, end))
-
-        # Flatten BPE
-        flat_bpe = []
-        for ids in bpe_words:
-            flat_bpe.extend(ids)
+        # ===== SHIFT BPE (+1) =====
+        bpe_ids = [i + 1 for i in ex["input_ids"]]
 
         return {
-            "phoneme_ids": flat_phon,
-            "word_spans": word_spans,
-            "bpe_ids": flat_bpe,
+            "phoneme_ids": phoneme_ids,
+            "bpe_ids": bpe_ids,
         }
+    
 
+def collate_fn(batch, text_cleaner, mlm_prob=0.15):
 
-def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
+    pad_id = text_cleaner.word_index_dictionary["$"]
+    mask_id = pad_id  # PL-BERT style: mask == pad
+    vocab_size = len(text_cleaner.word_index_dictionary)
 
-    pad_id = phoneme_tokenizer.pad_id
-    mask_id = phoneme_tokenizer.mask_id
-
-    # =========================
-    # 1. Ambil sequence phoneme
-    # =========================
-    phon_seqs = [ex["phoneme_ids"] for ex in batch]   # list of lists
-    spans     = [ex["word_spans"]   for ex in batch]
-    bpe_seqs  = [ex["bpe_ids"]      for ex in batch]  # list of lists
+    phon_seqs = [ex["phoneme_ids"] for ex in batch]
+    bpe_seqs  = [ex["bpe_ids"]     for ex in batch]
 
     B = len(batch)
     max_T = max(len(x) for x in phon_seqs)
 
-    # ============================
-    # 2. Siapkan output container
-    # ============================
     input_phon = torch.full((B, max_T), pad_id, dtype=torch.long)
     mlm_labels = torch.full((B, max_T), -100, dtype=torch.long)
     att_mask   = torch.zeros((B, max_T), dtype=torch.long)
 
-    # ============================
-    # 3. Whole word masking
-    # ============================
     for i in range(B):
         seq = phon_seqs[i]
         L = len(seq)
-        input_phon[i, :L] = torch.tensor(seq)
+
+        input_phon[i, :L] = torch.tensor(seq, dtype=torch.long)
         att_mask[i, :L] = 1
 
-        # pilih kata untuk masking
-        word_spans = spans[i]
-        num_words = len(word_spans)
+        num_mask = max(1, int(L * mlm_prob))
+        mask_idx = random.sample(range(L), num_mask)
 
-        # ambil 15% kata
-        num_mask = max(1, int(num_words * mlm_prob))
-        chosen = random.sample(range(num_words), num_mask)
+        for j in mask_idx:
+            mlm_labels[i, j] = seq[j]
 
-        # lakukan masking per kata
-        for widx in chosen:
-            start, end = word_spans[widx]
-            
-            # 80% mask
-            if random.random() < 0.8:
-                input_phon[i, start:end] = mask_id
-            # 10% random phoneme
-            elif random.random() < 0.5:
-                random_ids = torch.randint(0, phoneme_tokenizer.vocab_size, (end-start,))
-                input_phon[i, start:end] = random_ids
-            # 10% keep original → nothing to do
+            r = random.random()
+            if r < 0.8:
+                input_phon[i, j] = mask_id
+            elif r < 0.9:
+                input_phon[i, j] = random.randint(0, vocab_size - 1)
+            # else: keep original
 
-            # set MLM label ke original
-            mlm_labels[i, start:end] = torch.tensor(seq[start:end])
-
-    # ============================
-    # 4. Siapkan CTC targets
-    # ============================
-    # target = concat seluruh BPE per sample
     concat_bpe = []
     target_lengths = []
 
-    for bpe_ids in bpe_seqs:
-        concat_bpe.extend(bpe_ids)
-        target_lengths.append(len(bpe_ids))
+    for ids in bpe_seqs:
+        concat_bpe.extend(ids)
+        target_lengths.append(len(ids))
 
-    concat_bpe = torch.tensor(concat_bpe, dtype=torch.long)
-    target_lengths = torch.tensor(target_lengths, dtype=torch.long)
-
-    # input lengths untuk CTC (phoneme length sebelum padding)
-    input_lengths = torch.tensor([len(seq) for seq in phon_seqs], dtype=torch.long)
-
-    # final dictionary
     return {
-        "phoneme_input": input_phon,        # [B, T]
-        "mlm_labels": mlm_labels,           # [B, T]
-        "attention_mask": att_mask,         # [B, T]
-        "ctc_targets": concat_bpe,          # [sum_targets]
-        "input_lengths": input_lengths,     # [B]
-        "target_lengths": target_lengths,   # [B]
+        "phoneme_input": input_phon,            # [B, T]
+        "mlm_labels": mlm_labels,               # [B, T]
+        "attention_mask": att_mask,             # [B, T]
+        "ctc_targets": torch.tensor(concat_bpe, dtype=torch.long),
+        "input_lengths": torch.tensor(
+            [len(x) for x in phon_seqs], dtype=torch.long
+        ),
+        "target_lengths": torch.tensor(
+            target_lengths, dtype=torch.long
+        ),
     }
+
+
+def build_dataloader(hf_dataset, batch_size, num_workers=0, mlm_prob=0.15, shuffle_batches=True):
+    """
+    Dataloader yang match dengan:
+      - FilePathDataset: shift BPE +1 (blank=0 untuk CTC)
+      - collate_fn: menghasilkan dict batch untuk model.compute_loss()
+    """
+    ds = FilePathDataset(hf_dataset)
+
+    sampler = LengthBucketSampler(ds, batch_size=batch_size, shuffle=shuffle_batches)
+
+    loader = torch.utils.data.DataLoader(
+        ds,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=lambda b: collate_fn(b, ds.text_cleaner, mlm_prob=mlm_prob),
+    )
+    return loader, ds

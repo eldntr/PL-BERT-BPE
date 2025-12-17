@@ -1,0 +1,21 @@
+data_folder : ./processed_dataset
+mixed_precision : true
+log_dir : ./logs
+batch_size : 16
+mlm_proba : 0.15
+num_workers : 4
+num_steps : 1000000
+log_interval : 100
+save_interval : 50000
+
+dataset_params:
+  tokenizer : GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct
+
+model_params:
+    vocab_size: 178
+    hidden_size: 768
+    num_attention_heads: 12
+    intermediate_size: 2048
+    max_position_embeddings: 512
+    num_hidden_layers: 12
+    dropout: 0.1
