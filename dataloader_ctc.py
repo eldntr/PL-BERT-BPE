@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, Sampler
 import random
 import numpy as np
 
-from text_tokenizer import TextCleaner
+from text_utils import TextCleaner
 
 class LengthBucketSampler(Sampler):
     """
@@ -100,8 +100,13 @@ def collate_fn(batch, text_cleaner, mlm_prob=0.15):
         input_phon[i, :L] = torch.tensor(seq, dtype=torch.long)
         att_mask[i, :L] = 1
 
-        num_mask = max(1, int(L * mlm_prob))
-        mask_idx = random.sample(range(L), num_mask)
+        # === char-level MLM masking ===
+        if mlm_prob <= 0:
+            num_mask = 0
+            mask_idx = []
+        else:
+            num_mask = max(1, int(L * mlm_prob))
+            mask_idx = random.sample(range(L), num_mask)
 
         for j in mask_idx:
             mlm_labels[i, j] = seq[j]
