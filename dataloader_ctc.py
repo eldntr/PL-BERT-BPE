@@ -50,15 +50,15 @@ class FilePathDataset(Dataset):
     def __init__(
         self,
         dataset,                   # HuggingFace dataset
-        phoneme_tokenizer,        # PhonemeTokenizer instance
+        text_cleaner,             # TextCleaner instance
         mlm_prob=0.15,            # whole-word masking prob
-        mask_token_id=None,       # phoneme_tokenizer.mask_id
+        mask_token_id=None,       # text_cleaner.mask_id
     ):
         self.dataset = dataset
-        self.phoneme_tokenizer = phoneme_tokenizer
+        self.text_cleaner = text_cleaner
         self.mlm_prob = mlm_prob
-        self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
-        self.pad_id = phoneme_tokenizer.pad_id
+        self.mask_token_id = mask_token_id or text_cleaner.mask_id
+        self.pad_id = text_cleaner.pad_id
 
     def __len__(self):
         return len(self.dataset)
@@ -77,7 +77,7 @@ class FilePathDataset(Dataset):
         curr = 0
 
         for phoneme_str in phoneme_words:
-            phon_ids = self.phoneme_tokenizer.encode(phoneme_str)
+            phon_ids = self.text_cleaner.encode(phoneme_str)
             start = curr
             flat_phon.extend(phon_ids)
             curr += len(phon_ids)
@@ -96,10 +96,10 @@ class FilePathDataset(Dataset):
         }
 
 
-def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
+def collate_fn(batch, text_cleaner, mlm_prob=0.15):
 
-    pad_id = phoneme_tokenizer.pad_id
-    mask_id = phoneme_tokenizer.mask_id
+    pad_id = text_cleaner.pad_id
+    mask_id = text_cleaner.mask_id
 
     # =========================
     # 1. Ambil sequence phoneme
@@ -144,7 +144,7 @@ def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
                 input_phon[i, start:end] = mask_id
             # 10% random phoneme
             elif random.random() < 0.5:
-                random_ids = torch.randint(0, phoneme_tokenizer.vocab_size, (end-start,))
+                random_ids = torch.randint(0, text_cleaner.vocab_size, (end-start,))
                 input_phon[i, start:end] = random_ids
             # 10% keep original → nothing to do
 
