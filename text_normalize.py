@@ -260,8 +260,12 @@ def is_pure_punctuation(text: str) -> bool:
         return True
     if any(char.isalnum() for char in cleaned):
         return False
+    # Keep common punctuation marks
     allowed_keep = {".", ",", "!", "?", ";", ":"}
     if cleaned in allowed_keep:
+        return False  # Keep these punctuation marks
+    # Also allow multiple punctuation like "..." or "!!"
+    if all(char in ".,!?;:" for char in cleaned):
         return False
     return True
 
@@ -336,7 +340,11 @@ def normalize_single(text, prev_text = "", next_text = ""):
             token = f"{token} {suffix}"
 
     normalized_token = (prefix + token + suffix).replace("$", "")
+    # Keep punctuation marks instead of removing them
     if is_pure_punctuation(normalized_token):
+        # Return the normalized token if it's common punctuation, otherwise remove
+        if normalized_token.strip() and all(char in ".,!?;: " for char in normalized_token.strip()):
+            return normalized_token.strip()
         return ""
     return normalized_token
 

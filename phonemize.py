@@ -1,11 +1,10 @@
 import re
+import string
 import subprocess
 import warnings
 from functools import lru_cache
 
 from lingua import Language, LanguageDetectorBuilder
-# from text_normalize import normalize_text
-from phoneme_tokenizer import PhonemeTokenizer
 from text_normalize import normalize_text
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
@@ -47,46 +46,36 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
         return word
 
 
-def phonemize(text, text_tokenizer, phoneme_tokenizer):
-    """
-    text_tokenizer: instance TextTokenizer
-    phoneme_tokenizer: instance PhonemeTokenizer
-    """
-
+def phonemize(text, text_tokenizer):
     normalized = normalize_text(text)
-    words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized)
+    bpe_ids = text_tokenizer.encode(normalized)
 
-    # Skip if more than 50 words
-    if len(words) > 50:
-        return {
-            "before": text,
-            "after": "",
-            "words": [],
-            "bpe_ids": [],
-            "phonemes": [],
-        }
+    pattern = r'\w+|[^\w\s]'
+    words = re.findall(pattern, normalized)
 
-    output = {
-        "before": text,
-        "after": " ".join(words),
-        "words": [],
-        "bpe_ids": [],
-        "phonemes": [],
+    phonemes = []
+    for word in words:
+        if word in string.punctuation:
+            phonemes.append(word)
+        else:
+            phonemized = phonemize_word_espeak(word, ipa=True, keep_stress=True, sep="")
+            phonemes.append(phonemized)
+
+    phonemes = " ".join(phonemes)
+
+    return {
+        # "before": text,
+        # "after": normalized,
+        "bpe_ids": bpe_ids,
+        "phonemes": phonemes
     }
 
-    for w in words:
+if __name__ == "__main__":
+    from text_tokenizer import TextTokenizer
+    from phoneme_tokenizer import PhonemeTokenizer
 
-        # ----- BPE -----
-        bpe_ids = text_tokenizer.encode_word(w)
-        if len(bpe_ids) == 0:
-            continue
+    text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
-        # ----- PHONEME -----
-        phon_str = phonemize_word_espeak(w, ipa=True, keep_stress=False, sep=" ")
-
-        # ----- APPEND -----
-        output["words"].append(w)
-        output["bpe_ids"].append(bpe_ids)
-        output["phonemes"].append(phon_str)
-
-    return output
+    sample_text = "Hello world"
+    result = phonemize(sample_text, text_tokenizer)
+    print(result)
