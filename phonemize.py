@@ -48,7 +48,7 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
 
 def phonemize(text, text_tokenizer):
     normalized = normalize_text(text)
-    bpe_ids = text_tokenizer.encode(normalized)
+    bpe_ids = [text_tokenizer.bos_id] + text_tokenizer.encode(normalized) + [text_tokenizer.eos_id]
 
     pattern = r'\w+|[^\w\s]'
     words = re.findall(pattern, normalized)
@@ -64,9 +64,7 @@ def phonemize(text, text_tokenizer):
     phonemes = " ".join(phonemes)
 
     return {
-        # "before": text,
-        # "after": normalized,
-        "bpe_ids": bpe_ids,
+        "bpe_ids": bpe_ids, 
         "phonemes": phonemes
     }
 
@@ -76,6 +74,8 @@ if __name__ == "__main__":
 
     text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
-    sample_text = "Hello world"
+    sample_text = "Hello world!"
     result = phonemize(sample_text, text_tokenizer)
     print(result)
+
+    print(text_tokenizer.decode(result["bpe_ids"]))

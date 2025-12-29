@@ -7,6 +7,9 @@ class TextTokenizer:
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        
+        if self.tokenizer.mask_token is None:
+            self.tokenizer.add_special_tokens({"mask_token": "<mask>"})
 
         self.pad_id = self.tokenizer.pad_token_id
         self.eos_id = self.tokenizer.eos_token_id

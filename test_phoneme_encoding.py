@@ -4,7 +4,7 @@ from phoneme_tokenizer import PhonemeTokenizer
 phoneme_tokenizer = PhonemeTokenizer()
 
 # Sample phoneme string
-phoneme_str = 'hˈeɪloʊ dunˈia !'
+phoneme_str = 'hˈeɪloʊ dunˈia !,.?'
 
 print("Input phoneme string:")
 print(f"  '{phoneme_str}'")
@@ -33,3 +33,5 @@ print()
 print("Phoneme to ID mapping:")
 for phoneme, idx in sorted(phoneme_tokenizer.phoneme2id.items(), key=lambda x: x[1]):
     print(f"  {repr(phoneme):20s} -> {idx}")
+
+phoneme_tokenizer.save("sample_phoneme_vocab.json")
