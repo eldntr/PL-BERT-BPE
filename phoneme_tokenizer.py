@@ -23,13 +23,12 @@ class PhonemeTokenizer:
 
         self.pad_id = self.phoneme2id[pad_token]
         self.mask_id = self.phoneme2id[mask_token]
-        self.blank_id = self.phoneme2id[blank_token]
+        self.blank_id = self.phoneme2id[blank_token]  
         self.space_id = self.phoneme2id[space_token]
         self.space_token = space_token
         self.bos_id = self.phoneme2id[bos_token]
         self.eos_id = self.phoneme2id[eos_token]
 
-    # ----------------------------- SAVE/LOAD -----------------------------
     @classmethod
     def load(cls, path):
         with open(path, "r") as f:
@@ -40,7 +39,6 @@ class PhonemeTokenizer:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.phoneme2id, f, indent=2, ensure_ascii=False)
 
-    # ----------------------------- VOCAB BUILD -----------------------------
     def add_phoneme(self, p):
         if p not in self.phoneme2id:
             idx = len(self.phoneme2id)
@@ -53,7 +51,6 @@ class PhonemeTokenizer:
         for u in units:
             self.add_phoneme(u)
 
-    # ----------------------------- TOKENIZE -----------------------------
     def tokenize_sequence(self, p_str):
         """
         Pisahkan IPA output espeak menjadi unit phoneme (per-karakter IPA).
@@ -74,13 +71,12 @@ class PhonemeTokenizer:
         
         return tokens
 
-    # ----------------------------- ENCODE/DECODE -----------------------------
     def encode(self, phoneme_str):
         units = self.tokenize_sequence(phoneme_str)
         return [self.phoneme2id.get(u, self.blank_id) for u in units]
 
     def decode(self, ids):
-        return [self.id2phoneme.get(i, "<unk>") for i in ids]
+        return [self.id2phoneme.get(i, self.blank_id) for i in ids]
 
     @property
     def vocab_size(self):

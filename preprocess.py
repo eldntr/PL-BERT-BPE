@@ -10,7 +10,6 @@ from phonemize import phonemize
 text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 phoneme_tokenizer = PhonemeTokenizer()
 
-
 parquet_folder = "wikipedia.id"
 parquet_files = glob.glob(f"{parquet_folder}/*.parquet")
 
@@ -18,7 +17,7 @@ dataset = load_dataset("parquet", data_files=parquet_files)
 dataset = dataset["train"] if "train" in dataset else list(dataset.values())[0]
 
 root = "./wiki_phoneme"
-num_shards = 5000
+num_shards = 500000
 os.makedirs(root, exist_ok=True)
 
 
@@ -43,7 +42,7 @@ def process_shard(idx):
 
 from pebble import ProcessPool
 
-with ProcessPool(max_workers=32) as pool:
+with ProcessPool(max_workers=20) as pool:
     pool.map(process_shard, range(num_shards), timeout=60)
 
 shards = []
@@ -55,7 +54,6 @@ for s in os.listdir(root):
         pass
 
 dataset = concatenate_datasets(shards)
-
 
 print("Building phoneme vocabulary from processed data...")
 for example in dataset:

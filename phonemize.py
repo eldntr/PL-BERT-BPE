@@ -46,25 +46,91 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
         return word
 
 
-def phonemize(text, text_tokenizer):
+def phonemize(text, text_tokenizer, max_length=2048):
     normalized = normalize_text(text)
-    bpe_ids = [text_tokenizer.bos_id] + text_tokenizer.encode(normalized) + [text_tokenizer.eos_id]
+    sentences = re.split(r'([.!?]+\s+)', normalized)
+    
+    all_bpe_ids = []
+    all_phonemes = []
+    current_chunk_text = ""
+    current_chunk_tokens = 0
 
-    pattern = r'\w+|[^\w\s]'
-    words = re.findall(pattern, normalized)
+    max_chunk_size = max_length - 2
+    
+    for i, sentence in enumerate(sentences):
+        if not sentence.strip():
+            continue
+            
+        test_encoded = text_tokenizer.encode(sentence)
 
-    phonemes = []
-    for word in words:
-        if word in string.punctuation:
-            phonemes.append(word)
+        if current_chunk_tokens + len(test_encoded) > max_chunk_size and current_chunk_text:
+
+            chunk_encoded = text_tokenizer.encode(current_chunk_text)
+            chunk_bpe_ids = [text_tokenizer.bos_id] + chunk_encoded + [text_tokenizer.eos_id]
+
+            result = ""
+            i = 0
+            
+            while i < len(current_chunk_text):
+                if current_chunk_text[i].isspace():
+                    result += current_chunk_text[i]
+                    i += 1
+                elif current_chunk_text[i] in string.punctuation:
+                    result += current_chunk_text[i]
+                    i += 1
+                else:
+                    word_start = i
+                    while i < len(current_chunk_text) and not current_chunk_text[i].isspace() and current_chunk_text[i] not in string.punctuation:
+                        i += 1
+                    word = current_chunk_text[word_start:i]
+                    phonemized = phonemize_word_espeak(word, ipa=True, keep_stress=True, sep="")
+                    result += phonemized
+
+            if all_bpe_ids:
+                chunk_bpe_ids = chunk_bpe_ids[1:]  
+            all_bpe_ids.extend(chunk_bpe_ids[:-1]) 
+            all_phonemes.append(result)
+
+            current_chunk_text = sentence
+            current_chunk_tokens = len(test_encoded)
         else:
-            phonemized = phonemize_word_espeak(word, ipa=True, keep_stress=True, sep="")
-            phonemes.append(phonemized)
+            current_chunk_text += sentence
+            current_chunk_tokens += len(test_encoded)
 
-    phonemes = " ".join(phonemes)
+    if current_chunk_text:
+        chunk_encoded = text_tokenizer.encode(current_chunk_text)
+        chunk_bpe_ids = [text_tokenizer.bos_id] + chunk_encoded + [text_tokenizer.eos_id]
 
+        result = ""
+        i = 0
+        
+        while i < len(current_chunk_text):
+            if current_chunk_text[i].isspace():
+                result += current_chunk_text[i]
+                i += 1
+            elif current_chunk_text[i] in string.punctuation:
+                result += current_chunk_text[i]
+                i += 1
+            else:
+                word_start = i
+                while i < len(current_chunk_text) and not current_chunk_text[i].isspace() and current_chunk_text[i] not in string.punctuation:
+                    i += 1
+                word = current_chunk_text[word_start:i]
+                phonemized = phonemize_word_espeak(word, ipa=True, keep_stress=True, sep="")
+                result += phonemized
+        
+        if all_bpe_ids:
+            chunk_bpe_ids = chunk_bpe_ids[1:] 
+        all_bpe_ids.extend(chunk_bpe_ids)
+        all_phonemes.append(result)
+
+    if not all_bpe_ids:
+        all_bpe_ids = [text_tokenizer.bos_id, text_tokenizer.eos_id]
+    
+    phonemes = "".join(all_phonemes)
+    
     return {
-        "bpe_ids": bpe_ids, 
+        "bpe_ids": all_bpe_ids,
         "phonemes": phonemes
     }
 
@@ -74,8 +140,14 @@ if __name__ == "__main__":
 
     text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
-    sample_text = "Hello world!"
+    sample_text = open("test.txt").read()
     result = phonemize(sample_text, text_tokenizer)
     print(result)
 
-    print(text_tokenizer.decode(result["bpe_ids"]))
+    phoneme_tokenizer = PhonemeTokenizer()
+    phoneme_tokenizer.build_from_sentence(result["phonemes"])  # Tokenize the phonemes
+    encoded_phonemes = phoneme_tokenizer.encode(result["phonemes"])  # Encode the phonemes
+    print(encoded_phonemes)  # Print encoded phonemes
+    
+    decoded_phonemes = phoneme_tokenizer.decode(encoded_phonemes)  # Decode the phonemes
+    print(decoded_phonemes)  # Print decoded phonemes
