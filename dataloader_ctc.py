@@ -40,16 +40,24 @@ class FilePathDataset(Dataset):
         self,
         dataset,
         phoneme_tokenizer,
+        text_tokenizer,
         mlm_prob=0.15,
         replace_prob=0.2,
+        max_position_embedding=512,
     ):
         self.dataset = dataset
         self.phoneme_tokenizer = phoneme_tokenizer
+        self.text_tokenizer = text_tokenizer
         self.mlm_prob = mlm_prob
         self.replace_prob = replace_prob
+        self.max_position_embedding = max_position_embedding
         self.mask_id = phoneme_tokenizer.mask_id
         self.pad_id = phoneme_tokenizer.pad_id
         self.space_id = phoneme_tokenizer.space_id
+
+        self.period_phoneme_id = phoneme_tokenizer.encode(".")[0] if phoneme_tokenizer.encode(".") else None
+        period_bpe = text_tokenizer.encode(".")
+        self.period_bpe_id = period_bpe[0] if period_bpe else None
 
     def __len__(self):
         return len(self.dataset)
@@ -57,10 +65,13 @@ class FilePathDataset(Dataset):
     def __getitem__(self, idx):
         ex = self.dataset[idx]
 
-        phoneme_str = ex["phoneme"]
+        phoneme_str = ex["phonemes"]
         bpe_ids = ex["bpe_ids"]
         
         phoneme_ids = self.phoneme_tokenizer.encode(phoneme_str)
+ 
+        if len(phoneme_ids) > self.max_position_embedding:
+            phoneme_ids, bpe_ids = self._truncate_at_period(phoneme_ids, bpe_ids)
         
         word_spans = []
         start = 0
@@ -102,9 +113,44 @@ class FilePathDataset(Dataset):
             "mlm_labels": mlm_labels,
             "bpe_ids": bpe_ids,
         }
+    
+    def _truncate_at_period(self, phoneme_ids, bpe_ids):
+        """Memotong phoneme_ids dan bpe_ids pada titik (period) yang sama (kemunculan ke-N)."""
+        if self.period_phoneme_id is None or self.period_bpe_id is None:
+            return phoneme_ids[:self.max_position_embedding], bpe_ids[:self.max_position_embedding]
+
+        # Cari semua posisi period di kedua sequence
+        phoneme_period_positions = [i for i, pid in enumerate(phoneme_ids) if pid == self.period_phoneme_id]
+        bpe_period_positions = [i for i, bid in enumerate(bpe_ids) if bid == self.period_bpe_id]
+        
+        if not phoneme_period_positions:
+            return phoneme_ids[:self.max_position_embedding], bpe_ids[:self.max_position_embedding]
+
+        # Cari period terakhir sebelum max_position_embedding di phoneme_ids
+        valid_periods = [pos for pos in phoneme_period_positions if pos < self.max_position_embedding]
+        
+        if not valid_periods:
+            return phoneme_ids[:self.max_position_embedding], bpe_ids[:self.max_position_embedding]
+        
+        # Hitung ini adalah period ke-berapa (0-indexed)
+        # Contoh: jika valid_periods[-1] adalah posisi 13 dan itu period ketiga, maka period_index = 2
+        last_valid_period_pos = valid_periods[-1]
+        period_index = phoneme_period_positions.index(last_valid_period_pos)
+ 
+        # Potong phoneme_ids setelah period terakhir yang valid (inclusive period)
+        phoneme_cut_pos = last_valid_period_pos + 1
+
+        # Potong bpe_ids pada period yang sama (period ke-period_index)
+        if period_index < len(bpe_period_positions):
+            bpe_cut_pos = bpe_period_positions[period_index] + 1
+        else:
+            # Jika bpe_ids memiliki lebih sedikit period, gunakan semua bpe_ids
+            bpe_cut_pos = len(bpe_ids)
+        
+        return phoneme_ids[:phoneme_cut_pos], bpe_ids[:bpe_cut_pos]
 
 
-def collate_fn(batch, phoneme_tokenizer):
+def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
     pad_id = phoneme_tokenizer.pad_id
 
     phon_seqs = [ex["phoneme_ids"] for ex in batch]
@@ -146,3 +192,4 @@ def collate_fn(batch, phoneme_tokenizer):
         "input_lengths": input_lengths,
         "target_lengths": target_lengths,
     }
+

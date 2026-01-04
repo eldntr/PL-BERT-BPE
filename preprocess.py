@@ -42,8 +42,8 @@ def process_shard(idx):
 
 from pebble import ProcessPool
 
-with ProcessPool(max_workers=20) as pool:
-    pool.map(process_shard, range(num_shards), timeout=60)
+with ProcessPool(max_workers=28) as pool:
+    pool.map(process_shard, range(num_shards), timeout=600)
 
 shards = []
 for s in os.listdir(root):
@@ -53,11 +53,12 @@ for s in os.listdir(root):
     except:
         pass
 
+print(f"Combining {len(shards)} shards...")
 dataset = concatenate_datasets(shards)
 
 print("Building phoneme vocabulary from processed data...")
 for example in dataset:
-    phoneme_tokenizer.build_from_sentence(example["phoneme"])
+    phoneme_tokenizer.build_from_sentence(example["phonemes"])
 
 print(f"Total phonemes in vocab: {phoneme_tokenizer.vocab_size}")
 

@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
     text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
-    sample_text = open("test.txt").read()
+    sample_text = "Hello world!"
     result = phonemize(sample_text, text_tokenizer)
     print(result)
 

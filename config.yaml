@@ -1,0 +1,52 @@
+# Training Configuration
+# Model: PL-BERT with BPE
+
+# Dataset paths
+data:
+  dataset_path: "wiki_phoneme_final"
+  phoneme_vocab_path: "phoneme_vocab.json"
+  text_tokenizer_name: "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
+
+# Model architecture
+model:
+  hidden_size: 512
+  num_layers: 6
+  num_heads: 8
+  intermediate_size: 256
+  max_position_embeddings: 256
+
+# Training hyperparameters
+training:
+  # Batch size and accumulation
+  batch_size: 1                      # Per-GPU batch size
+  gradient_accumulation_steps: 32    # Effective batch = batch_size * world_size * grad_accum
+  
+  # Training duration
+  max_steps: 1000000                 # Total training steps (1M)
+  
+  # Checkpointing and evaluation
+  save_every: 100000                 # Save checkpoint every N steps
+  eval_every: 1000                   # Run validation every N steps
+  eval_steps: 100                    # Number of steps for validation
+  log_every: 100                     # Log training metrics every N steps
+  
+  # Optimization
+  learning_rate: 0.0001              # Learning rate (1e-4)
+  mlm_prob: 0.15                     # Masked Language Model probability
+  lambda_ctc: 1.0                    # CTC loss weight
+  
+  # DataLoader
+  num_workers: 4                     # Number of dataloader workers
+  pin_memory: true                   # Pin memory for faster GPU transfer
+
+# Data split ratios
+split:
+  train: 0.98
+  val: 0.01
+  test: 0.01
+  seed: 42
+
+# Logging
+logging:
+  log_dir: "logs"
+  save_dir: "checkpoints"
