@@ -9,11 +9,11 @@ data:
 
 # Model architecture
 model:
-  hidden_size: 768
+  hidden_size: 384
   num_layers: 12
   num_heads: 12
-  intermediate_size: 2048
-  max_position_embeddings: 512
+  intermediate_size: 384
+  max_position_embeddings: 256
 
 # Training hyperparameters
 training:
@@ -31,7 +31,7 @@ training:
   log_every: 100                     # Log training metrics every N steps
   
   # Optimization
-  learning_rate: 0.0001              # Learning rate (1e-4)
+  learning_rate: 0.0001              # `Learning rate (1e-4)
   mlm_prob: 0.15                     # Masked Language Model probability
   lambda_ctc: 1.0                    # CTC loss weight
   

@@ -157,8 +157,21 @@ def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
     mlm_labels_list = [ex["mlm_labels"] for ex in batch]
     bpe_seqs = [ex["bpe_ids"] for ex in batch]
 
-    B = len(batch)
-    max_T = max(len(x) for x in phon_seqs)
+    # Filter out empty sequences
+    valid_indices = [i for i, seq in enumerate(phon_seqs) if len(seq) > 0]
+    if not valid_indices:
+        # If all sequences are empty, return a batch with minimum length 1
+        valid_indices = [0]
+        phon_seqs[0] = [pad_id]
+        mlm_labels_list[0] = [-100]
+        bpe_seqs[0] = [0]
+    
+    phon_seqs = [phon_seqs[i] for i in valid_indices]
+    mlm_labels_list = [mlm_labels_list[i] for i in valid_indices]
+    bpe_seqs = [bpe_seqs[i] for i in valid_indices]
+
+    B = len(phon_seqs)
+    max_T = max(len(x) for x in phon_seqs) if phon_seqs else 1
 
     input_phon = torch.full((B, max_T), pad_id, dtype=torch.long)
     mlm_labels = torch.full((B, max_T), -100, dtype=torch.long)
