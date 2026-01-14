@@ -7,7 +7,6 @@ class PhonemeTokenizer:
                  phoneme2id=None,
                  pad_token="<pad>",
                  mask_token="<mask>",
-                 blank_token="<blank>",
                  space_token="<space>",
                  bos_token="<bos>",
                  eos_token="<eos>"
@@ -15,7 +14,7 @@ class PhonemeTokenizer:
 
         self.phoneme2id = phoneme2id or {}
 
-        for tok in [pad_token, mask_token, blank_token, space_token, bos_token, eos_token]:
+        for tok in [pad_token, mask_token, space_token, bos_token, eos_token]:
             if tok not in self.phoneme2id:
                 self.phoneme2id[tok] = len(self.phoneme2id)
 
@@ -23,7 +22,6 @@ class PhonemeTokenizer:
 
         self.pad_id = self.phoneme2id[pad_token]
         self.mask_id = self.phoneme2id[mask_token]
-        self.blank_id = self.phoneme2id[blank_token]  
         self.space_id = self.phoneme2id[space_token]
         self.space_token = space_token
         self.bos_id = self.phoneme2id[bos_token]
@@ -73,10 +71,10 @@ class PhonemeTokenizer:
 
     def encode(self, phoneme_str):
         units = self.tokenize_sequence(phoneme_str)
-        return [self.phoneme2id.get(u, self.blank_id) for u in units]
+        return [self.phoneme2id.get(u, self.pad_id) for u in units]
 
     def decode(self, ids):
-        return [self.id2phoneme.get(i, self.blank_id) for i in ids]
+        return [self.id2phoneme.get(i, self.pad_id) for i in ids]
 
     @property
     def vocab_size(self):
