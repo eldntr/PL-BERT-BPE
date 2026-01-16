@@ -47,7 +47,7 @@ dataset = load_dataset("parquet", data_files=parquet_files)
 dataset = dataset["train"] if "train" in dataset else list(dataset.values())[0]
 
 root = "./wiki_phoneme"
-num_shards = 500000
+num_shards = 5000
 os.makedirs(root, exist_ok=True)
 
 
@@ -74,7 +74,7 @@ def process_shard(idx):
 
 from pebble import ProcessPool
 
-with ProcessPool(max_workers=20) as pool:
+with ProcessPool(max_workers=32) as pool:
     pool.map(process_shard, range(num_shards), timeout=60)
 
 shards = []

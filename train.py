@@ -109,12 +109,16 @@ def train():
         print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
 
     train_ds = FilePathDataset(
-        train_dataset, phoneme_tokenizer, text_tokenizer,
-        mlm_prob=mlm_prob, max_position_embedding=model_config['max_position_embeddings']
+        train_dataset,
+        phoneme_tokenizer,
+        mlm_prob=mlm_prob,
+        max_length=model_config['max_position_embeddings']
     )
     val_ds = FilePathDataset(
-        val_dataset, phoneme_tokenizer, text_tokenizer,
-        mlm_prob=0.0, max_position_embedding=model_config['max_position_embeddings']
+        val_dataset,
+        phoneme_tokenizer,
+        mlm_prob=0.0,
+        max_length=model_config['max_position_embeddings']
     )
 
     train_sampler = DistributedSampler(
@@ -129,13 +133,21 @@ def train():
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, sampler=train_sampler,
         num_workers=train_config['num_workers'],
-        collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
+        collate_fn=lambda batch: collate_fn(
+            batch,
+            phoneme_tokenizer,
+            mlm_prob=mlm_prob
+        ),
         pin_memory=train_config['pin_memory']
     )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, sampler=val_sampler,
         num_workers=train_config['num_workers'],
-        collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=0.0),
+        collate_fn=lambda batch: collate_fn(
+            batch,
+            phoneme_tokenizer,
+            mlm_prob=0.0
+        ),
         pin_memory=train_config['pin_memory']
     )
 
