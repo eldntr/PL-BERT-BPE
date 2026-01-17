@@ -51,11 +51,13 @@ class FilePathDataset(Dataset):
         self,
         dataset,                   # HuggingFace dataset
         phoneme_tokenizer,        # PhonemeTokenizer instance
+        text_tokenizer,           # TextTokenizer instance untuk mapping BPE IDs
         mlm_prob=0.15,            # whole-word masking prob
         mask_token_id=None,       # phoneme_tokenizer.mask_id
     ):
         self.dataset = dataset
         self.phoneme_tokenizer = phoneme_tokenizer
+        self.text_tokenizer = text_tokenizer
         self.mlm_prob = mlm_prob
         self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
         self.pad_id = phoneme_tokenizer.pad_id
@@ -84,9 +86,13 @@ class FilePathDataset(Dataset):
             end = curr
             word_spans.append((start, end))
 
-        # Flatten BPE
+        # --- Flatten BPE & MAPPING ---
         flat_bpe = []
         for ids in bpe_words:
+            # Jika tokenizer punya mapping, convert dari original ke compact IDs
+            if self.text_tokenizer.use_pruning:
+                ids = [self.text_tokenizer.original_to_compact[i] for i in ids]
+            
             flat_bpe.extend(ids)
 
         return {

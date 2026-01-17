@@ -53,7 +53,7 @@ def train():
 
     # Batch size per GPU - total effective batch = batch_size * world_size
     # Dengan 4 GPU & batch_size=192: effective batch = 192 * 4 = 768
-    batch_size = 192
+    batch_size = 1
     max_steps = 1_000_000  # 1 juta step
     save_every = 100_000   # simpan setiap 100rb step
     lr = 1e-4
@@ -69,7 +69,10 @@ def train():
         print(f"Device: {device}")
 
     # ---------- LOAD TOKENIZERS ----------
-    text_tokenizer = TextTokenizer(text_tokenizer_name)
+    # Pastikan file map sudah digenerate oleh script build_pruned_vocab.py
+    text_tokenizer = TextTokenizer(text_tokenizer_name, map_file="bpe_vocab_map.json")
+    
+    # Otomatis vocab size akan mengecil (misal jadi 20.000) jika use_pruning=True
     bpe_vocab_size = len(text_tokenizer)
 
     phoneme_tokenizer = PhonemeTokenizer.load(phoneme_vocab_path)
@@ -77,7 +80,7 @@ def train():
 
     if is_main_process:
         print("Phoneme vocab size:", phoneme_vocab_size)
-        print("BPE vocab size:", bpe_vocab_size)
+        print("Pruned BPE vocab size:", bpe_vocab_size)  # Pastikan angka ini kecil
 
     # ---------- LOAD DATASET ----------
     if is_main_process:
@@ -86,7 +89,7 @@ def train():
     if is_main_process:
         print("Dataset size:", len(hf_dataset))
 
-    dataset = FilePathDataset(hf_dataset, phoneme_tokenizer, mlm_prob=mlm_prob)
+    dataset = FilePathDataset(hf_dataset, phoneme_tokenizer, text_tokenizer, mlm_prob=mlm_prob)
 
     # Gunakan DistributedSampler untuk DDP (bukan LengthBucketSampler)
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
@@ -119,7 +122,7 @@ def train():
     ).to(device)
     
     # Wrap model dengan DDP
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=False)
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
