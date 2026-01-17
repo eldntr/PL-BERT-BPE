@@ -127,6 +127,15 @@ def train():
     model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    
+    # --- LEARNING RATE SCHEDULER ---
+    # Mode 'min' karena kita ingin loss mengecil
+    # factor 0.5 artinya LR dikali 0.5 (dipotong setengah) jika macet
+    # patience 5000 artinya jika 5000 step tidak ada perbaikan, baru potong LR
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5000
+    )
+    
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
 
     global_step = 0
@@ -191,13 +200,17 @@ def train():
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
+                
+                # Update scheduler dengan loss (hanya saat optimizer step)
+                scheduler.step(loss.item())
 
             # Hanya main process yang print log (gunakan loss asli, bukan normalized)
             if is_main_process and global_step % log_every == 0:
+                current_lr = optimizer.param_groups[0]['lr']
                 print(
                     f"Step {global_step}/{max_steps} | "
-                    f"Loss: {loss.item():.4f} | MLM: {mlm_loss.item():.4f} | "
-                    f"CTC: {ctc_loss.item():.4f}"
+                    f"Loss: {loss.item():.4f} | LR: {current_lr:.2e} | "
+                    f"MLM: {mlm_loss.item():.4f} | CTC: {ctc_loss.item():.4f}"
                 )
 
             # Simpan checkpoint setiap 100rb step (hanya main process)
