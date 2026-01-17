@@ -46,7 +46,7 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
         return word
 
 
-def phonemize(text, text_tokenizer, max_length=2048):
+def phonemize(text, text_tokenizer):
     normalized = normalize_text(text)
     
     text_encoded = text_tokenizer.encode(normalized)
@@ -74,21 +74,3 @@ def phonemize(text, text_tokenizer, max_length=2048):
         "bpe_ids": bpe_ids,
         "phonemes": result
     }
-
-if __name__ == "__main__":
-    from text_tokenizer import TextTokenizer
-    from phoneme_tokenizer import PhonemeTokenizer
-
-    text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
-
-    sample_text = "hari ini! saya pergi, memancing"
-    result = phonemize(sample_text, text_tokenizer)
-    print(result)
-
-    phoneme_tokenizer = PhonemeTokenizer()
-    phoneme_tokenizer.build_from_sentence(result["phonemes"])  # Tokenize the phonemes
-    encoded_phonemes = phoneme_tokenizer.encode(result["phonemes"])  # Encode the phonemes
-    print(encoded_phonemes)  # Print encoded phonemes
-    
-    decoded_phonemes = phoneme_tokenizer.decode(encoded_phonemes)  # Decode the phonemes
-    print(decoded_phonemes)  # Print decoded phonemes

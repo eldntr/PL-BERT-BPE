@@ -47,7 +47,7 @@ dataset = load_dataset("parquet", data_files=parquet_files)
 dataset = dataset["train"] if "train" in dataset else list(dataset.values())[0]
 
 root = "./wiki_phoneme"
-num_shards = 5000
+num_shards = 50000
 os.makedirs(root, exist_ok=True)
 
 
@@ -71,6 +71,15 @@ def process_shard(idx):
     os.makedirs(out_dir, exist_ok=True)
     processed.save_to_disk(out_dir)
 
+    record = []
+    for ex in processed:
+        record.append({
+            "phonemes": ex["phonemes"],
+            "bpe_ids": ex["bpe_ids"]
+        })
+    
+    with open(f"{out_dir}/log.json", "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2, ensure_ascii=False)
 
 from pebble import ProcessPool
 

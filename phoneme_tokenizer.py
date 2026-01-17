@@ -7,14 +7,12 @@ class PhonemeTokenizer:
                  phoneme2id=None,
                  pad_token="<pad>",
                  mask_token="<mask>",
-                 space_token="<space>",
-                 bos_token="<bos>",
-                 eos_token="<eos>"
+                 space_token="<space>"
                  ):
 
         self.phoneme2id = phoneme2id or {}
 
-        for tok in [pad_token, mask_token, space_token, bos_token, eos_token]:
+        for tok in [pad_token, mask_token, space_token]:
             if tok not in self.phoneme2id:
                 self.phoneme2id[tok] = len(self.phoneme2id)
 
@@ -24,8 +22,6 @@ class PhonemeTokenizer:
         self.mask_id = self.phoneme2id[mask_token]
         self.space_id = self.phoneme2id[space_token]
         self.space_token = space_token
-        self.bos_id = self.phoneme2id[bos_token]
-        self.eos_id = self.phoneme2id[eos_token]
 
     @classmethod
     def load(cls, path):
