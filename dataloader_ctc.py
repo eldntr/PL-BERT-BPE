@@ -95,6 +95,21 @@ class FilePathDataset(Dataset):
             
             flat_bpe.extend(ids)
 
+        # ===== VALIDASI LENGTH MISMATCH =====
+        # CTC memerlukan input_length >= target_length (karena 1 input bisa map ke 1 output)
+        # Jika phoneme lebih pendek dari BPE, skip sample ini
+        if len(flat_phon) < len(flat_bpe):
+            # Debug info
+            import warnings
+            warnings.warn(
+                f"Skipped sample {idx}: phoneme_len ({len(flat_phon)}) < bpe_len ({len(flat_bpe)}). "
+                f"This causes CTC loss to be invalid."
+            )
+            # Return empty sample untuk skip, atau return sample pertama sebagai fallback
+            # Lebih baik skip dengan return None, tapi DataLoader tidak support None
+            # Jadi return sample pertama sebagai fallback
+            return self.__getitem__(0)
+
         return {
             "phoneme_ids": flat_phon,
             "word_spans": word_spans,

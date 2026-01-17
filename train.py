@@ -51,11 +51,12 @@ def train():
     phoneme_vocab_path = "./wiki_phoneme/phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
-    # Batch size per GPU - total effective batch = batch_size * world_size
-    # Dengan 4 GPU & batch_size=192: effective batch = 192 * 4 = 768
-    batch_size = 1
-    max_steps = 1_000_000  # 1 juta step
-    save_every = 100_000   # simpan setiap 100rb step
+    # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
+    # Dengan batch_size=1 & grad_accum_steps=64 & 4 GPU: effective batch = 1 * 64 * 4 = 256
+    batch_size = 1                # Batch fisik (agar muat di GPU)
+    grad_accum_steps = 64         # Gradient accumulation (sangat penting untuk CTC!)
+    max_steps = 1_000_000         # 1 juta step
+    save_every = 100_000          # simpan setiap 100rb step
     lr = 1e-4
     mlm_prob = 0.15
     lambda_ctc = 1.0
@@ -65,7 +66,8 @@ def train():
     
     if is_main_process:
         print(f"Per-GPU batch size: {batch_size}")
-        print(f"Total effective batch size: {batch_size * world_size}")
+        print(f"Gradient accumulation steps: {grad_accum_steps}")
+        print(f"Total effective batch size: {batch_size * grad_accum_steps * world_size}")
         print(f"Device: {device}")
 
     # ---------- LOAD TOKENIZERS ----------
@@ -149,7 +151,9 @@ def train():
             input_lengths  = batch["input_lengths"].to(device)      # [B]
             target_lengths = batch["target_lengths"].to(device)     # [B]
 
-            optimizer.zero_grad()
+            # Lazy zero_grad - hanya lakukan setelah accumulation lengkap
+            if global_step % grad_accum_steps == 1:
+                optimizer.zero_grad()
 
             mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
 
@@ -176,12 +180,19 @@ def train():
             )
 
             loss = mlm_loss + lambda_ctc * ctc_loss
-            loss.backward()
+            
+            # ===== GRADIENT ACCUMULATION =====
+            # Normalize loss untuk akumulasi yang benar
+            loss_normalized = loss / grad_accum_steps
+            loss_normalized.backward()
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            # Update weights hanya setiap grad_accum_steps
+            if global_step % grad_accum_steps == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
 
-            # Hanya main process yang print log
+            # Hanya main process yang print log (gunakan loss asli, bukan normalized)
             if is_main_process and global_step % log_every == 0:
                 print(
                     f"Step {global_step}/{max_steps} | "
