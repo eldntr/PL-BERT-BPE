@@ -47,7 +47,7 @@ def train():
         print(f"🚀 Training with {world_size} GPUs (DDP)")
     
     # ---------- PATH & PARAM ----------
-    dataset_path = "wiki_phoneme_final"
+    dataset_path = "wiki_phoneme_final_v2"
     phoneme_vocab_path = "./wiki_phoneme/phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
@@ -56,7 +56,7 @@ def train():
     batch_size = 1                # Batch fisik (agar muat di GPU)
     grad_accum_steps = 64         # Gradient accumulation (sangat penting untuk CTC!)
     max_steps = 1_000_000         # 1 juta step
-    save_every = 100_000          # simpan setiap 100rb step
+    save_every = 50_000          # simpan setiap 100rb step
     lr = 1e-4
     mlm_prob = 0.15
     lambda_ctc = 1.0
@@ -120,7 +120,7 @@ def train():
         num_layers=6,
         num_heads=8,
         intermediate_size=2048,
-        max_position_embeddings=512,
+        max_position_embeddings=1024,  # Increased for BOS/EOS/space tokens
     ).to(device)
     
     # Wrap model dengan DDP

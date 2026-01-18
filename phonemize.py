@@ -54,7 +54,11 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
     """
 
     normalized = normalize_text(text)
-    words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*", normalized)
+    
+    # --- MODIFIKASI 1: Regex baru untuk menangkap kata DAN tanda baca ---
+    # Regex lama hanya alphanumeric: r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*"
+    # Regex baru: Menangkap kata (\w+) ATAU non-whitespace/non-word ([^\w\s])
+    words = re.findall(r"\w+(?:'\w+)*|[^\w\s]", normalized)
 
     # Skip if more than 50 words
     if len(words) > 50:
@@ -74,19 +78,44 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    for w in words:
+    # --- MODIFIKASI 2: Tambahkan BOS di awal ---
+    output["words"].append(phoneme_tokenizer.bos_token)
+    output["phonemes"].append(phoneme_tokenizer.bos_token)
+    output["bpe_ids"].append([text_tokenizer.bos_id])  # Ambil BOS ID dari TextTokenizer
 
-        # ----- BPE -----
+    for i, w in enumerate(words):
+        # --- MODIFIKASI 3: Tambahkan SPASI sebelum kata (kecuali kata pertama) ---
+        if i > 0:
+            output["words"].append(" ")
+            output["phonemes"].append(phoneme_tokenizer.space_token)  # Token <space>
+            
+            # Encode spasi untuk BPE (penting agar BPE tidak nempel)
+            # LLaMA tokenizer biasanya sensitif spasi
+            space_bpe = text_tokenizer.encode_word(" ")
+            output["bpe_ids"].append(space_bpe)
+
+        # ----- PROCESS WORD / PUNCTUATION -----
+        # 1. BPE
         bpe_ids = text_tokenizer.encode_word(w)
+        # Jika kosong (misal karakter aneh), skip atau beri UNK
         if len(bpe_ids) == 0:
-            continue
+            bpe_ids = [text_tokenizer.unk_id]
 
-        # ----- PHONEME -----
-        phon_str = phonemize_word_espeak(w, ipa=True, keep_stress=False, sep=" ")
+        # 2. PHONEME
+        # Cek apakah ini tanda baca? Jika ya, jangan masuk espeak (bisa error/aneh)
+        if re.match(r"^[^\w\s]+$", w):
+            phon_str = w  # Gunakan tanda baca itu sendiri sebagai phoneme
+        else:
+            phon_str = phonemize_word_espeak(w, ipa=True, keep_stress=False, sep=" ")
 
         # ----- APPEND -----
         output["words"].append(w)
         output["bpe_ids"].append(bpe_ids)
         output["phonemes"].append(phon_str)
+
+    # --- MODIFIKASI 4: Tambahkan EOS di akhir ---
+    output["words"].append(phoneme_tokenizer.eos_token)
+    output["phonemes"].append(phoneme_tokenizer.eos_token)
+    output["bpe_ids"].append([text_tokenizer.eos_id])
 
     return output

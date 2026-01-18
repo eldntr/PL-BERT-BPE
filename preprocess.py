@@ -114,5 +114,5 @@ print("Saved phoneme vocab to", f"{root}/phoneme_vocab.json")
 # -----------------------------------------------------------------
 # Save dataset
 # -----------------------------------------------------------------
-dataset.save_to_disk("wiki_phoneme_final")
+dataset.save_to_disk("wiki_phoneme_final_v2")
 print("Saved dataset to wiki_phoneme_final")

@@ -7,11 +7,16 @@ class PhonemeTokenizer:
                  phoneme2id=None,
                  pad_token="<pad>",
                  mask_token="<mask>",
-                 blank_token="<blank>"):
+                 blank_token="<blank>",
+                 bos_token="<s>",       # TAMBAHAN
+                 eos_token="</s>",      # TAMBAHAN
+                 space_token="<space>"  # TAMBAHAN
+                 ):
 
         self.phoneme2id = phoneme2id or {}
 
-        for tok in [pad_token, mask_token, blank_token]:
+        # Daftarkan semua special token
+        for tok in [pad_token, mask_token, blank_token, bos_token, eos_token, space_token]:
             if tok not in self.phoneme2id:
                 self.phoneme2id[tok] = len(self.phoneme2id)
 
@@ -20,6 +25,15 @@ class PhonemeTokenizer:
         self.pad_id = self.phoneme2id[pad_token]
         self.mask_id = self.phoneme2id[mask_token]
         self.blank_id = self.phoneme2id[blank_token]
+        
+        # Simpan ID untuk logic di phonemize
+        self.bos_id = self.phoneme2id[bos_token]
+        self.eos_id = self.phoneme2id[eos_token]
+        self.space_id = self.phoneme2id[space_token]
+        
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.space_token = space_token
 
     # ----------------------------- SAVE/LOAD -----------------------------
     @classmethod

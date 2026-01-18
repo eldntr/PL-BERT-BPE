@@ -336,8 +336,12 @@ def normalize_single(text, prev_text = "", next_text = ""):
             token = f"{token} {suffix}"
 
     normalized_token = (prefix + token + suffix).replace("$", "")
-    if is_pure_punctuation(normalized_token):
-        return ""
+    
+    # --- MODIFIKASI: Jangan hapus tanda baca ---
+    # if is_pure_punctuation(normalized_token):
+    #     return ""
+    # -------------------------------------------
+    
     return normalized_token
 
 def normalize_text(text):

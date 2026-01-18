@@ -6,7 +6,7 @@ from text_tokenizer import TextTokenizer
 
 def build_pruned_vocab():
     # 1. Load Dataset yang sudah diproses
-    dataset_path = "wiki_phoneme_final"
+    dataset_path = "wiki_phoneme_final_v2"
     print(f"Loading dataset from {dataset_path}...")
     dataset = load_from_disk(dataset_path)
     
