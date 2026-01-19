@@ -1,12 +1,12 @@
 import json
 import torch
+import argparse
 from datasets import load_from_disk
 from tqdm import tqdm
 from text_tokenizer import TextTokenizer
 
-def build_pruned_vocab():
+def build_pruned_vocab(dataset_path="wiki_phoneme_final_v2"):
     # 1. Load Dataset yang sudah diproses
-    dataset_path = "wiki_phoneme_final_v2"
     print(f"Loading dataset from {dataset_path}...")
     dataset = load_from_disk(dataset_path)
     
@@ -54,10 +54,8 @@ def build_pruned_vocab():
         "compact_to_original": compact_to_original
     }
     
-    with open("bpe_vocab_map.json", "w") as f:
+    output_file = f"{dataset_path}/bpe_vocab_map.json"
+    with open(output_file, "w") as f:
         json.dump(output_map, f, indent=2)
         
-    print("Saved mapping to bpe_vocab_map.json")
-
-if __name__ == "__main__":
-    build_pruned_vocab()
+    print(f"Saved mapping to {output_file}")

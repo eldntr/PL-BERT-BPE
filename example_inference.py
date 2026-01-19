@@ -33,7 +33,7 @@ def load_model(checkpoint_path, phoneme_vocab_size, bpe_vocab_size, device="cpu"
         num_layers=6,
         num_heads=8,
         intermediate_size=2048,
-        max_position_embeddings=512,
+        max_position_embeddings=1024,
     )
             
     model.load_state_dict(new_state_dict)
@@ -102,11 +102,11 @@ def predict(model, text, phoneme_tokenizer, text_tokenizer, device):
 if __name__ == "__main__":
     # Config
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    CHECKPOINT = "checkpoint_step_1000000.pt"
-    PHONEME_VOCAB = "./wiki_phoneme/phoneme_vocab.json"
+    CHECKPOINT = "checkpoint_step_100000.pt"
+    PHONEME_VOCAB = "wikipedia-50/phoneme_vocab.json"
     TEXT_TOKENIZER = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
-    text_tokenizer = TextTokenizer(TEXT_TOKENIZER, map_file="bpe_vocab_map.json")
+    text_tokenizer = TextTokenizer(TEXT_TOKENIZER, map_file="wikipedia-50/bpe_vocab_map.json")
     phoneme_tokenizer = PhonemeTokenizer.load(PHONEME_VOCAB)
     
     model = load_model(
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         device=DEVICE
     )
 
-    text = "saya makan nasi"
+    text = "saya, makan nasi goreng!"
     output = predict(model, text, phoneme_tokenizer, text_tokenizer, DEVICE)
     
     print(f"output: {output}")

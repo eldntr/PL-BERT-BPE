@@ -23,6 +23,12 @@ from model import MultiTaskModel
 
 
 # =========================
+# METRIC UTILITIES
+# =========================
+# (metrics removed per request)
+
+
+# =========================
 # 4. TRAIN LOOP
 # =========================
 
@@ -37,6 +43,8 @@ def cleanup_ddp():
     """Cleanup DDP"""
     dist.destroy_process_group()
 
+# (evaluation removed per request)
+
 def train():
     # ---------- DDP SETUP ----------
     local_rank = setup_ddp()
@@ -47,8 +55,9 @@ def train():
         print(f"🚀 Training with {world_size} GPUs (DDP)")
     
     # ---------- PATH & PARAM ----------
-    dataset_path = "wiki_phoneme_final_v2"
-    phoneme_vocab_path = "./wiki_phoneme/phoneme_vocab.json"
+    dataset_path = "wikipedia-50"
+    train_dataset_path = f"{dataset_path}/train"
+    phoneme_vocab_path = f"{dataset_path}/phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
     # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
@@ -57,7 +66,12 @@ def train():
     grad_accum_steps = 64         # Gradient accumulation (sangat penting untuk CTC!)
     max_steps = 1_000_000         # 1 juta step
     save_every = 50_000          # simpan setiap 100rb step
-    lr = 1e-4
+    # eval_every removed: no evaluation during training
+    
+    # Learning rate settings untuk model besar
+    lr_max = 5e-4                 # Peak LR (lebih tinggi untuk model besar)
+    warmup_steps = 10_000         # Warmup 10k steps untuk stabilitas
+    
     mlm_prob = 0.15
     lambda_ctc = 1.0
     log_every = 100
@@ -72,7 +86,7 @@ def train():
 
     # ---------- LOAD TOKENIZERS ----------
     # Pastikan file map sudah digenerate oleh script build_pruned_vocab.py
-    text_tokenizer = TextTokenizer(text_tokenizer_name, map_file="bpe_vocab_map.json")
+    text_tokenizer = TextTokenizer(text_tokenizer_name, map_file=f"{dataset_path}/bpe_vocab_map.json")
     
     # Otomatis vocab size akan mengecil (misal jadi 20.000) jika use_pruning=True
     bpe_vocab_size = len(text_tokenizer)
@@ -86,31 +100,41 @@ def train():
 
     # ---------- LOAD DATASET ----------
     if is_main_process:
-        print("Loading dataset from", dataset_path)
-    hf_dataset = load_from_disk(dataset_path)
+        print("Loading training dataset from", train_dataset_path)
+    hf_train_dataset = load_from_disk(train_dataset_path)
     if is_main_process:
-        print("Dataset size:", len(hf_dataset))
+        print("Training dataset size:", len(hf_train_dataset))
+    # # Use only the first 100k samples
+    # train_limit = min(100_000, len(hf_train_dataset))
+    # hf_train_dataset = hf_train_dataset.select(range(train_limit))
+    # if is_main_process:
+    #     print(f"Using subset of training data: {train_limit} samples")
 
-    dataset = FilePathDataset(hf_dataset, phoneme_tokenizer, text_tokenizer, mlm_prob=mlm_prob)
+    # Test dataset is not used; evaluation disabled
+
+    train_dataset = FilePathDataset(hf_train_dataset, phoneme_tokenizer, text_tokenizer, mlm_prob=mlm_prob, max_position_embeddings=1024)
+    # test_dataset removed
 
     # Gunakan DistributedSampler untuk DDP (bukan LengthBucketSampler)
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
-    sampler = DistributedSampler(
-        dataset,
+    train_sampler = DistributedSampler(
+        train_dataset,
         num_replicas=world_size,
         rank=local_rank,
         shuffle=True,
         seed=42
     )
 
-    loader = DataLoader(
-        dataset,
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
-        sampler=sampler,
+        sampler=train_sampler,
         num_workers=4,
         collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
         pin_memory=True
     )
+    
+    # test_loader removed (no evaluation)
 
     # ---------- MODEL ----------
     model = MultiTaskModel(
@@ -126,15 +150,21 @@ def train():
     # Wrap model dengan DDP
     model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    # Start with very low LR for warmup stability
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-7)
     
-    # --- LEARNING RATE SCHEDULER ---
-    # Mode 'min' karena kita ingin loss mengecil
-    # factor 0.5 artinya LR dikali 0.5 (dipotong setengah) jika macet
-    # patience 5000 artinya jika 5000 step tidak ada perbaikan, baru potong LR
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5000
-    )
+    # --- LEARNING RATE SCHEDULER WITH WARMUP ---
+    def get_lr_scale(step):
+        """Linear warmup + cosine decay"""
+        if step < warmup_steps:
+            # Linear warmup dari 0 ke 1
+            return float(step) / float(max(1, warmup_steps))
+        else:
+            # Cosine decay setelah warmup
+            progress = float(step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+            return max(0.1, 0.5 * (1.0 + math.cos(math.pi * progress)))
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, get_lr_scale)
     
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
 
@@ -144,9 +174,9 @@ def train():
     # Training loop dengan step-based (bukan epoch-based)
     while global_step < max_steps:
         # Set epoch untuk sampler agar shuffle berbeda setiap epoch
-        sampler.set_epoch(global_step // len(loader))
+        train_sampler.set_epoch(global_step // len(train_loader))
         
-        for batch in loader:
+        for batch in train_loader:
             if global_step >= max_steps:
                 break
                 
@@ -173,7 +203,7 @@ def train():
                 mlm_labels.view(B*T),
                 ignore_index=-100
             )
-
+            
             # ----- CTC LOSS -----
             # CTC expects [T, B, C]
             ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
@@ -198,19 +228,22 @@ def train():
             # Update weights hanya setiap grad_accum_steps
             if global_step % grad_accum_steps == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                
+                # Manual LR update untuk warmup + cosine decay
+                lr_scale = get_lr_scale(global_step)
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr_max * lr_scale
+                
                 optimizer.step()
                 optimizer.zero_grad()
-                
-                # Update scheduler dengan loss (hanya saat optimizer step)
-                scheduler.step(loss.item())
+                scheduler.step()  # Update scheduler state
 
             # Hanya main process yang print log (gunakan loss asli, bukan normalized)
             if is_main_process and global_step % log_every == 0:
                 current_lr = optimizer.param_groups[0]['lr']
                 print(
                     f"Step {global_step}/{max_steps} | "
-                    f"Loss: {loss.item():.4f} | LR: {current_lr:.2e} | "
-                    f"MLM: {mlm_loss.item():.4f} | CTC: {ctc_loss.item():.4f}"
+                    f"Loss: {loss.item():.4f} | LR: {current_lr:.2e} | MLM: {mlm_loss.item():.4f} | CTC: {ctc_loss.item():.4f}"
                 )
 
             # Simpan checkpoint setiap 100rb step (hanya main process)

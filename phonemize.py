@@ -1,6 +1,7 @@
 import re
 import subprocess
 import warnings
+import string
 from functools import lru_cache
 
 from lingua import Language, LanguageDetectorBuilder
@@ -51,69 +52,101 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
     """
     text_tokenizer: instance TextTokenizer
     phoneme_tokenizer: instance PhonemeTokenizer
+    
+    Parse text character by character untuk mempertahankan spacing asli.
+    Tanda baca menempel pada kata sebelumnya tanpa spasi.
     """
 
     normalized = normalize_text(text)
     
-    # --- MODIFIKASI 1: Regex baru untuk menangkap kata DAN tanda baca ---
-    # Regex lama hanya alphanumeric: r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)*"
-    # Regex baru: Menangkap kata (\w+) ATAU non-whitespace/non-word ([^\w\s])
-    words = re.findall(r"\w+(?:'\w+)*|[^\w\s]", normalized)
-
-    # Skip if more than 50 words
-    if len(words) > 50:
-        return {
-            "before": text,
-            "after": "",
-            "words": [],
-            "bpe_ids": [],
-            "phonemes": [],
-        }
-
+    # Truncate setelah normalize: batasi ke <150 kata, potong di titik terdekat jika ada
+    words_norm = normalized.split()
+    if len(words_norm) > 150:
+        truncated = " ".join(words_norm[:150])
+        last_period = truncated.rfind(".")
+        if last_period > 0:
+            normalized = truncated[:last_period + 1]
+        else:
+            normalized = truncated
+    
     output = {
         "before": text,
-        "after": " ".join(words),
+        "after": normalized,
         "words": [],
         "bpe_ids": [],
         "phonemes": [],
     }
 
-    # --- MODIFIKASI 2: Tambahkan BOS di awal ---
+    # --- Tambahkan BOS di awal ---
     output["words"].append(phoneme_tokenizer.bos_token)
     output["phonemes"].append(phoneme_tokenizer.bos_token)
-    output["bpe_ids"].append([text_tokenizer.bos_id])  # Ambil BOS ID dari TextTokenizer
+    output["bpe_ids"].append([text_tokenizer.bos_id])
 
-    for i, w in enumerate(words):
-        # --- MODIFIKASI 3: Tambahkan SPASI sebelum kata (kecuali kata pertama) ---
-        if i > 0:
-            output["words"].append(" ")
-            output["phonemes"].append(phoneme_tokenizer.space_token)  # Token <space>
+    # Parse character by character untuk track spacing
+    i = 0
+    prev_was_space = False  # Track apakah karakter sebelumnya adalah spasi
+    
+    while i < len(normalized):
+        # Skip whitespace dan tandai bahwa kita melewati spasi
+        if normalized[i].isspace():
+            prev_was_space = True
+            i += 1
+            continue
             
-            # Encode spasi untuk BPE (penting agar BPE tidak nempel)
-            # LLaMA tokenizer biasanya sensitif spasi
+        # Handle punctuation
+        if normalized[i] in string.punctuation:
+            punct = normalized[i]
+            
+            # Jika ada spasi sebelum punctuation (rare case), tambahkan space token
+            if prev_was_space and len(output["phonemes"]) > 1:  # > 1 karena sudah ada BOS
+                output["words"].append(" ")
+                output["phonemes"].append(phoneme_tokenizer.space_token)
+                space_bpe = text_tokenizer.encode_word(" ")
+                output["bpe_ids"].append(space_bpe)
+            
+            # Process punctuation
+            bpe_ids = text_tokenizer.encode_word(punct)
+            if len(bpe_ids) == 0:
+                bpe_ids = [text_tokenizer.unk_id]
+            
+            output["words"].append(punct)
+            output["phonemes"].append(punct)
+            output["bpe_ids"].append(bpe_ids)
+            
+            prev_was_space = False
+            i += 1
+            continue
+        
+        # Handle word (alphanumeric + apostrophe)
+        word_start = i
+        while i < len(normalized) and not normalized[i].isspace() and normalized[i] not in string.punctuation:
+            i += 1
+        word = normalized[word_start:i]
+        
+        if not word:  # Safety check
+            continue
+        
+        # Tambahkan space token jika ada spasi sebelum word ini (kecuali di awal)
+        if prev_was_space and len(output["phonemes"]) > 1:  # > 1 karena sudah ada BOS
+            output["words"].append(" ")
+            output["phonemes"].append(phoneme_tokenizer.space_token)
             space_bpe = text_tokenizer.encode_word(" ")
             output["bpe_ids"].append(space_bpe)
-
-        # ----- PROCESS WORD / PUNCTUATION -----
-        # 1. BPE
-        bpe_ids = text_tokenizer.encode_word(w)
-        # Jika kosong (misal karakter aneh), skip atau beri UNK
+        
+        # Process word
+        bpe_ids = text_tokenizer.encode_word(word)
         if len(bpe_ids) == 0:
             bpe_ids = [text_tokenizer.unk_id]
-
-        # 2. PHONEME
-        # Cek apakah ini tanda baca? Jika ya, jangan masuk espeak (bisa error/aneh)
-        if re.match(r"^[^\w\s]+$", w):
-            phon_str = w  # Gunakan tanda baca itu sendiri sebagai phoneme
-        else:
-            phon_str = phonemize_word_espeak(w, ipa=True, keep_stress=False, sep=" ")
-
-        # ----- APPEND -----
-        output["words"].append(w)
-        output["bpe_ids"].append(bpe_ids)
+        
+        phon_str = phonemize_word_espeak(word, ipa=True, keep_stress=False, sep=" ")
+        
+        output["words"].append(word)
         output["phonemes"].append(phon_str)
+        output["bpe_ids"].append(bpe_ids)
+        
+        prev_was_space = False
 
-    # --- MODIFIKASI 4: Tambahkan EOS di akhir ---
+    # --- Tambahkan EOS di akhir ---
     output["words"].append(phoneme_tokenizer.eos_token)
     output["phonemes"].append(phoneme_tokenizer.eos_token)
     output["bpe_ids"].append([text_tokenizer.eos_id])

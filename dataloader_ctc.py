@@ -54,6 +54,7 @@ class FilePathDataset(Dataset):
         text_tokenizer,           # TextTokenizer instance untuk mapping BPE IDs
         mlm_prob=0.15,            # whole-word masking prob
         mask_token_id=None,       # phoneme_tokenizer.mask_id
+        max_position_embeddings=1536,  # Skip samples longer than this
     ):
         self.dataset = dataset
         self.phoneme_tokenizer = phoneme_tokenizer
@@ -61,12 +62,38 @@ class FilePathDataset(Dataset):
         self.mlm_prob = mlm_prob
         self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
         self.pad_id = phoneme_tokenizer.pad_id
+        self.max_position_embeddings = max_position_embeddings
+        
+        # ===== FILTER SAMPLES THAT ARE TOO LONG =====
+        # Skip samples dengan phoneme length > max_position_embeddings
+        print(f"Filtering samples longer than {max_position_embeddings} tokens...")
+        valid_indices = []
+        skipped_count = 0
+        
+        for idx in range(len(dataset)):
+            ex = dataset[idx]
+            phoneme_words = ex["phonemes"]
+            
+            # Hitung total phoneme length
+            total_phon_len = sum(len(self.phoneme_tokenizer.encode(phon_str)) for phon_str in phoneme_words)
+            
+            if total_phon_len <= max_position_embeddings:
+                valid_indices.append(idx)
+            else:
+                skipped_count += 1
+        
+        print(f"Filtered dataset: {len(valid_indices)}/{len(dataset)} samples valid ({skipped_count} skipped)")
+        
+        # Create a filtered view of the dataset
+        self.valid_indices = valid_indices
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        ex = self.dataset[idx]
+        # Map from filtered index to original dataset index
+        original_idx = self.valid_indices[idx]
+        ex = self.dataset[original_idx]
 
         # --- Extract ---
         phoneme_words = ex["phonemes"]       # list of phoneme strings
@@ -102,7 +129,7 @@ class FilePathDataset(Dataset):
             # Debug info
             import warnings
             warnings.warn(
-                f"Skipped sample {idx}: phoneme_len ({len(flat_phon)}) < bpe_len ({len(flat_bpe)}). "
+                f"Skipped sample {original_idx}: phoneme_len ({len(flat_phon)}) < bpe_len ({len(flat_bpe)}). "
                 f"This causes CTC loss to be invalid."
             )
             # Return empty sample untuk skip, atau return sample pertama sebagai fallback

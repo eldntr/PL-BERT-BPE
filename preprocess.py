@@ -6,6 +6,7 @@ from datasets import load_dataset, load_from_disk, concatenate_datasets
 from text_tokenizer import TextTokenizer
 from phoneme_tokenizer import PhonemeTokenizer
 from phonemize import phonemize
+from build_pruned_vocab import build_pruned_vocab
 
 # -----------------------------------------------------------------
 # Load tokenizer
@@ -73,8 +74,8 @@ def process_shard(idx):
 # -----------------------------------------------------------------
 from pebble import ProcessPool
 
-with ProcessPool(max_workers=32) as pool:
-    pool.map(process_shard, range(num_shards), timeout=60)
+with ProcessPool(max_workers=28) as pool:
+    pool.map(process_shard, range(num_shards), timeout=600)
 
 # -----------------------------------------------------------------
 # Merge the shards
@@ -103,16 +104,33 @@ for example in dataset:
 print(f"Total phonemes in vocab: {phoneme_tokenizer.vocab_size}")
 
 # -----------------------------------------------------------------
-# Save phoneme vocab
-# -----------------------------------------------------------------
-phoneme_tokenizer.save(f"{root}/phoneme_vocab.json")
-print("Saved phoneme vocab to", f"{root}/phoneme_vocab.json")
-
-# Note: phoneme_ids will be generated on-the-fly in the dataloader
-# This prevents ID collision issues from multiprocessing
-
-# -----------------------------------------------------------------
 # Save dataset
 # -----------------------------------------------------------------
-dataset.save_to_disk("wiki_phoneme_final_v2")
-print("Saved dataset to wiki_phoneme_final")
+dataset_output_dir = "wikipedia-50"
+dataset.save_to_disk(dataset_output_dir)
+print(f"Saved dataset to {dataset_output_dir}")
+
+# -----------------------------------------------------------------
+# Split into train and test sets
+# -----------------------------------------------------------------
+train_test_split = dataset.train_test_split(test_size=0.1, seed=42)
+train_dataset = train_test_split["train"]
+test_dataset = train_test_split["test"]
+
+# Save train and test splits
+train_dir = f"{dataset_output_dir}/train"
+test_dir = f"{dataset_output_dir}/test"
+
+train_dataset.save_to_disk(train_dir)
+test_dataset.save_to_disk(test_dir)
+print(f"Saved training set ({len(train_dataset)} examples) to {train_dir}")
+print(f"Saved test set ({len(test_dataset)} examples) to {test_dir}")
+
+# -----------------------------------------------------------------
+# Save phoneme vocab ke dalam dataset folder
+# -----------------------------------------------------------------
+phoneme_tokenizer.save(f"{dataset_output_dir}/phoneme_vocab.json")
+print(f"Saved phoneme vocab to {dataset_output_dir}/phoneme_vocab.json")
+
+build_pruned_vocab(dataset_path=dataset_output_dir)
+print(f"Built and saved pruned BPE vocab map to {dataset_output_dir}/bpe_vocab_map.json")
