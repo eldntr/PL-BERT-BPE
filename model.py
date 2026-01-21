@@ -15,7 +15,6 @@ class MultiTaskModel(nn.Module):
     ):
         super().__init__()
 
-        # ALBERT config
         config = AlbertConfig(
             vocab_size=phoneme_vocab_size,
             embedding_size=hidden_size,

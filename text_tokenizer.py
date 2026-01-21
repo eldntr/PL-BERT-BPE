@@ -13,8 +13,7 @@ class TextTokenizer:
         self.eos_id = self.tokenizer.eos_token_id
         self.bos_id = self.tokenizer.bos_token_id
         self.unk_id = self.tokenizer.unk_token_id
-        
-        # --- Logic Pruning ---
+
         self.map_file = map_file
         self.original_to_compact = {}
         self.compact_to_original = {}
@@ -24,7 +23,6 @@ class TextTokenizer:
             print(f"Loading BPE Map from {map_file}")
             with open(map_file, 'r') as f:
                 data = json.load(f)
-                # JSON keys are always strings, convert back to int
                 self.original_to_compact = {int(k): v for k, v in data["original_to_compact"].items()}
                 self.compact_to_original = {int(k): v for k, v in data["compact_to_original"].items()}
             self.use_pruning = True
@@ -36,14 +34,12 @@ class TextTokenizer:
         """Encode word. Jika pruning aktif, return Compact IDs."""
         raw_ids = self.tokenizer.encode(word, add_special_tokens=False)
         if self.use_pruning:
-            # Map ke compact ID, gunakan unk_id jika entah kenapa ada token baru (safety)
             return [self.original_to_compact.get(rid, self.original_to_compact.get(self.unk_id, 0)) for rid in raw_ids]
         return raw_ids
 
     def decode(self, ids):
         """Decode IDs. Jika pruning aktif, convert Compact -> Original dulu."""
         if self.use_pruning:
-            # Convert Compact -> Original
             original_ids = [self.compact_to_original.get(i, self.unk_id) for i in ids]
             return self.tokenizer.decode(original_ids).strip()
         else:
@@ -55,7 +51,7 @@ class TextTokenizer:
             return batch_ids_list
         
         mapped_batch = []
-        for seq in batch_ids_list: # seq is list of ints
+        for seq in batch_ids_list:
             mapped_seq = [self.original_to_compact.get(oid, self.original_to_compact.get(self.unk_id)) for oid in seq]
             mapped_batch.append(mapped_seq)
         return mapped_batch

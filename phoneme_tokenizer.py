@@ -8,14 +8,13 @@ class PhonemeTokenizer:
                  pad_token="<pad>",
                  mask_token="<mask>",
                  blank_token="<blank>",
-                 bos_token="<s>",       # TAMBAHAN
-                 eos_token="</s>",      # TAMBAHAN
-                 space_token="<space>"  # TAMBAHAN
+                 bos_token="<s>",       
+                 eos_token="</s>",      
+                 space_token="<space>"  
                  ):
 
         self.phoneme2id = phoneme2id or {}
 
-        # Daftarkan semua special token
         for tok in [pad_token, mask_token, blank_token, bos_token, eos_token, space_token]:
             if tok not in self.phoneme2id:
                 self.phoneme2id[tok] = len(self.phoneme2id)
@@ -26,7 +25,6 @@ class PhonemeTokenizer:
         self.mask_id = self.phoneme2id[mask_token]
         self.blank_id = self.phoneme2id[blank_token]
         
-        # Simpan ID untuk logic di phonemize
         self.bos_id = self.phoneme2id[bos_token]
         self.eos_id = self.phoneme2id[eos_token]
         self.space_id = self.phoneme2id[space_token]
@@ -35,7 +33,6 @@ class PhonemeTokenizer:
         self.eos_token = eos_token
         self.space_token = space_token
 
-    # ----------------------------- SAVE/LOAD -----------------------------
     @classmethod
     def load(cls, path):
         with open(path, "r") as f:
@@ -46,7 +43,6 @@ class PhonemeTokenizer:
         with open(path, "w") as f:
             json.dump(self.phoneme2id, f, indent=2)
 
-    # ----------------------------- VOCAB BUILD -----------------------------
     def add_phoneme(self, p):
         if p not in self.phoneme2id:
             idx = len(self.phoneme2id)
@@ -59,7 +55,6 @@ class PhonemeTokenizer:
         for u in units:
             self.add_phoneme(u)
 
-    # ----------------------------- TOKENIZE -----------------------------
     def tokenize_sequence(self, p_str):
         """
         Pisahkan IPA output espeak menjadi unit phoneme.
@@ -75,7 +70,6 @@ class PhonemeTokenizer:
         # fallback: per karakter IPA
         return list(p_str)
 
-    # ----------------------------- ENCODE/DECODE -----------------------------
     def encode(self, phoneme_str):
         units = self.tokenize_sequence(phoneme_str)
         return [self.phoneme2id.get(u, self.blank_id) for u in units]

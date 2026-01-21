@@ -7,30 +7,17 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
 from datasets import load_from_disk
 
-from transformers import AutoTokenizer
-
 from text_tokenizer import TextTokenizer
 from phoneme_tokenizer import PhonemeTokenizer
-from dataloader_ctc import FilePathDataset, collate_fn, LengthBucketSampler
+from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
-
-
-# =========================
-# METRIC UTILITIES
-# =========================
-# (metrics removed per request)
-
-
-# =========================
-# 4. TRAIN LOOP
-# =========================
 
 def setup_ddp():
     """Initialize DDP environment"""
@@ -43,18 +30,14 @@ def cleanup_ddp():
     """Cleanup DDP"""
     dist.destroy_process_group()
 
-# (evaluation removed per request)
-
 def train():
-    # ---------- DDP SETUP ----------
     local_rank = setup_ddp()
     world_size = dist.get_world_size()
     is_main_process = (local_rank == 0)
     
     if is_main_process:
         print(f"🚀 Training with {world_size} GPUs (DDP)")
-    
-    # ---------- PATH & PARAM ----------
+  
     dataset_path = "wikipedia-50"
     train_dataset_path = f"{dataset_path}/train"
     phoneme_vocab_path = f"{dataset_path}/phoneme_vocab.json"
@@ -62,13 +45,11 @@ def train():
 
     # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
     # Dengan batch_size=1 & grad_accum_steps=64 & 4 GPU: effective batch = 1 * 64 * 4 = 256
-    batch_size = 1                # Batch fisik (agar muat di GPU)
-    grad_accum_steps = 64         # Gradient accumulation (sangat penting untuk CTC!)
-    max_steps = 1_000_000         # 1 juta step
-    save_every = 50_000          # simpan setiap 100rb step
-    # eval_every removed: no evaluation during training
-    
-    # Learning rate settings untuk model besar
+    batch_size = 1                
+    grad_accum_steps = 64         
+    max_steps = 1_000_000        
+    save_every = 50_000        
+
     lr_max = 5e-4                 # Peak LR (lebih tinggi untuk model besar)
     warmup_steps = 10_000         # Warmup 10k steps untuk stabilitas
     
@@ -84,11 +65,8 @@ def train():
         print(f"Total effective batch size: {batch_size * grad_accum_steps * world_size}")
         print(f"Device: {device}")
 
-    # ---------- LOAD TOKENIZERS ----------
-    # Pastikan file map sudah digenerate oleh script build_pruned_vocab.py
     text_tokenizer = TextTokenizer(text_tokenizer_name, map_file=f"{dataset_path}/bpe_vocab_map.json")
-    
-    # Otomatis vocab size akan mengecil (misal jadi 20.000) jika use_pruning=True
+
     bpe_vocab_size = len(text_tokenizer)
 
     phoneme_tokenizer = PhonemeTokenizer.load(phoneme_vocab_path)
@@ -96,26 +74,16 @@ def train():
 
     if is_main_process:
         print("Phoneme vocab size:", phoneme_vocab_size)
-        print("Pruned BPE vocab size:", bpe_vocab_size)  # Pastikan angka ini kecil
+        print("Pruned BPE vocab size:", bpe_vocab_size) 
 
-    # ---------- LOAD DATASET ----------
     if is_main_process:
         print("Loading training dataset from", train_dataset_path)
     hf_train_dataset = load_from_disk(train_dataset_path)
     if is_main_process:
         print("Training dataset size:", len(hf_train_dataset))
-    # # Use only the first 100k samples
-    # train_limit = min(100_000, len(hf_train_dataset))
-    # hf_train_dataset = hf_train_dataset.select(range(train_limit))
-    # if is_main_process:
-    #     print(f"Using subset of training data: {train_limit} samples")
-
-    # Test dataset is not used; evaluation disabled
 
     train_dataset = FilePathDataset(hf_train_dataset, phoneme_tokenizer, text_tokenizer, mlm_prob=mlm_prob, max_position_embeddings=1024)
-    # test_dataset removed
 
-    # Gunakan DistributedSampler untuk DDP (bukan LengthBucketSampler)
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
     train_sampler = DistributedSampler(
         train_dataset,
@@ -133,10 +101,7 @@ def train():
         collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
         pin_memory=True
     )
-    
-    # test_loader removed (no evaluation)
 
-    # ---------- MODEL ----------
     model = MultiTaskModel(
         phoneme_vocab_size=phoneme_vocab_size,
         bpe_vocab_size=bpe_vocab_size,
@@ -146,14 +111,11 @@ def train():
         intermediate_size=2048,
         max_position_embeddings=1024,  # Increased for BOS/EOS/space tokens
     ).to(device)
-    
-    # Wrap model dengan DDP
+
     model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
-    # Start with very low LR for warmup stability
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-7)
-    
-    # --- LEARNING RATE SCHEDULER WITH WARMUP ---
+
     def get_lr_scale(step):
         """Linear warmup + cosine decay"""
         if step < warmup_steps:
@@ -171,7 +133,6 @@ def train():
     global_step = 0
     model.train()
 
-    # Training loop dengan step-based (bukan epoch-based)
     while global_step < max_steps:
         # Set epoch untuk sampler agar shuffle berbeda setiap epoch
         train_sampler.set_epoch(global_step // len(train_loader))
@@ -196,7 +157,6 @@ def train():
 
             mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
 
-            # ----- MLM LOSS -----
             B, T, Vp = mlm_logits.shape
             mlm_loss = F.cross_entropy(
                 mlm_logits.view(B*T, Vp),
@@ -204,8 +164,6 @@ def train():
                 ignore_index=-100
             )
             
-            # ----- CTC LOSS -----
-            # CTC expects [T, B, C]
             ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
 
             # Shift BPE ids by +1 (0 = blank)
@@ -219,9 +177,7 @@ def train():
             )
 
             loss = mlm_loss + lambda_ctc * ctc_loss
-            
-            # ===== GRADIENT ACCUMULATION =====
-            # Normalize loss untuk akumulasi yang benar
+
             loss_normalized = loss / grad_accum_steps
             loss_normalized.backward()
 
@@ -236,9 +192,8 @@ def train():
                 
                 optimizer.step()
                 optimizer.zero_grad()
-                scheduler.step()  # Update scheduler state
+                scheduler.step()  
 
-            # Hanya main process yang print log (gunakan loss asli, bukan normalized)
             if is_main_process and global_step % log_every == 0:
                 current_lr = optimizer.param_groups[0]['lr']
                 print(
@@ -246,27 +201,24 @@ def train():
                     f"Loss: {loss.item():.4f} | LR: {current_lr:.2e} | MLM: {mlm_loss.item():.4f} | CTC: {ctc_loss.item():.4f}"
                 )
 
-            # Simpan checkpoint setiap 100rb step (hanya main process)
             if is_main_process and global_step % save_every == 0:
                 ckpt_path = f"checkpoint_step_{global_step}.pt"
                 torch.save({
-                    "model_state": model.module.state_dict(),  # .module untuk unwrap DDP
+                    "model_state": model.module.state_dict(),  
                     "optimizer_state": optimizer.state_dict(),
                     "global_step": global_step,
                 }, ckpt_path)
                 print(f"✓ Saved checkpoint to {ckpt_path}")
 
-    # Simpan checkpoint final (hanya main process)
     if is_main_process:
         final_ckpt_path = f"checkpoint_step_{global_step}_final.pt"
         torch.save({
-            "model_state": model.module.state_dict(),  # .module untuk unwrap DDP
+            "model_state": model.module.state_dict(),  
             "optimizer_state": optimizer.state_dict(),
             "global_step": global_step,
         }, final_ckpt_path)
         print(f"✓ Training complete! Final checkpoint saved to {final_ckpt_path}")
-    
-    # Cleanup DDP
+
     cleanup_ddp()
 
 

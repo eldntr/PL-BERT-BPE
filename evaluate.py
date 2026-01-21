@@ -11,9 +11,6 @@ from phoneme_tokenizer import PhonemeTokenizer
 from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
 
-# sklearn removed - not needed for token classification with large vocab
-
-
 def compute_mlm_accuracy(logits, labels):
     """Compute MLM accuracy (ignoring -100 labels)"""
     B, T, V = logits.shape
@@ -31,10 +28,6 @@ def compute_mlm_accuracy(logits, labels):
 
 
 def compute_f1_macro(logits, labels, num_classes_to_consider=50):
-    """
-    Compute Macro F1 for top classes only (avoids sklearn warning for large vocab).
-    Only considers the most frequent classes in the labels.
-    """
     B, T, V = logits.shape
     predictions = logits.argmax(dim=-1).view(-1)  # [B*T]
     labels_flat = labels.view(-1)  # [B*T]
@@ -46,15 +39,13 @@ def compute_f1_macro(logits, labels, num_classes_to_consider=50):
     
     predictions_masked = predictions[mask]
     labels_masked = labels_flat[mask]
-    
-    # Get unique classes from ground truth (only evaluate what's actually in test set)
+
     unique_classes = torch.unique(labels_masked).cpu().numpy()
     num_classes = min(len(unique_classes), num_classes_to_consider)
     
     if num_classes == 0:
         return 0.0
-    
-    # Compute precision and recall for each class
+
     f1_scores = []
     for cls in unique_classes[:num_classes]:
         tp = ((predictions_masked == cls) & (labels_masked == cls)).sum().item()
@@ -70,8 +61,7 @@ def compute_f1_macro(logits, labels, num_classes_to_consider=50):
             f1 = 0.0
         
         f1_scores.append(f1)
-    
-    # Return macro average
+
     return sum(f1_scores) / len(f1_scores) if f1_scores else 0.0
 
 
@@ -103,8 +93,7 @@ def compute_ctc_wer(ctc_logits, ctc_targets, input_lengths, target_lengths):
                 pred_decoded.append(pred_seq[j] - 1)  # Shift back (CTC uses +1)
         
         pred_decoded = pred_decoded[:len(target_seq)]
-        
-        # WER (Word Error Rate) - edit distance
+ 
         from difflib import SequenceMatcher
         matcher = SequenceMatcher(None, pred_decoded, target_seq)
         distance = len(target_seq) - sum(block.size for block in matcher.get_matching_blocks())
@@ -188,8 +177,7 @@ def evaluate(
         num_batches += 1
 
     model.train()
-    
-    # Average metrics
+
     avg_mlm_loss = total_mlm_loss / max(num_batches, 1)
     avg_mlm_acc = total_mlm_acc / max(num_batches, 1)
     avg_f1_macro = total_f1_macro / max(num_batches, 1)
@@ -206,14 +194,12 @@ def evaluate(
 
 
 def main():
-    # ============ CONFIG ============
     dataset_path = "wikipedia-50"
     test_dataset_path = f"{dataset_path}/test"
     phoneme_vocab_path = f"{dataset_path}/phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
-    
-    # Checkpoint to evaluate (user should set this)
-    checkpoint_path = "checkpoint_step_1000000_final.pt"  # Change this to your checkpoint
+
+    checkpoint_path = "checkpoint_step_1000000_final.pt" 
     
     batch_size = 1
     mlm_prob = 0.15
@@ -224,8 +210,7 @@ def main():
     print(f"Checkpoint: {checkpoint_path}")
     print(f"Device: {device}")
     print()
-    
-    # ============ LOAD TOKENIZERS ============
+   
     print("Loading tokenizers...")
     text_tokenizer = TextTokenizer(text_tokenizer_name, map_file=f"{dataset_path}/bpe_vocab_map.json")
     bpe_vocab_size = len(text_tokenizer)
@@ -236,8 +221,7 @@ def main():
     print(f"Phoneme vocab size: {phoneme_vocab_size}")
     print(f"BPE vocab size: {bpe_vocab_size}")
     print()
-    
-    # ============ LOAD TEST DATASET ============
+
     print(f"Loading test dataset from {test_dataset_path}...")
     hf_test_dataset = load_from_disk(test_dataset_path)
     print(f"Test dataset size: {len(hf_test_dataset)}")
@@ -259,8 +243,7 @@ def main():
         collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
         pin_memory=True
     )
-    
-    # ============ LOAD MODEL ============
+  
     print(f"Loading model...")
     model = MultiTaskModel(
         phoneme_vocab_size=phoneme_vocab_size,
@@ -271,8 +254,7 @@ def main():
         intermediate_size=2048,
         max_position_embeddings=1024,
     ).to(device)
-    
-    # Load checkpoint
+
     if not os.path.exists(checkpoint_path):
         print(f"❌ Checkpoint not found: {checkpoint_path}")
         print(f"Available checkpoints:")
@@ -287,8 +269,7 @@ def main():
     print(f"✓ Loaded checkpoint from {checkpoint_path}")
     print(f"  Global step: {checkpoint.get('global_step', 'N/A')}")
     print()
-    
-    # ============ EVALUATE ============
+
     print("=" * 80)
     print("EVALUATION RESULTS")
     print("=" * 80)
@@ -312,8 +293,7 @@ def main():
     print(f"CTC Loss:       {metrics['ctc_loss']:.4f}")
     print(f"WER:            {metrics['wer']:.4f} ({metrics['wer']*100:.2f}%)")
     print("-" * 80)
-    
-    # Save results to JSON
+
     results_file = f"eval_results_{os.path.basename(checkpoint_path)}.json"
     with open(results_file, "w") as f:
         json.dump({

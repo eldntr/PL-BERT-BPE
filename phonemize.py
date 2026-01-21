@@ -5,8 +5,6 @@ import string
 from functools import lru_cache
 
 from lingua import Language, LanguageDetectorBuilder
-# from text_normalize import normalize_text
-from phoneme_tokenizer import PhonemeTokenizer
 from text_normalize import normalize_text
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
@@ -49,17 +47,11 @@ def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
 
 
 def phonemize(text, text_tokenizer, phoneme_tokenizer):
-    """
-    text_tokenizer: instance TextTokenizer
-    phoneme_tokenizer: instance PhonemeTokenizer
-    
-    Parse text character by character untuk mempertahankan spacing asli.
-    Tanda baca menempel pada kata sebelumnya tanpa spasi.
-    """
 
     normalized = normalize_text(text)
     
     # Truncate setelah normalize: batasi ke <150 kata, potong di titik terdekat jika ada
+    # Optional, sesuaikan dengan resources anda :>
     words_norm = normalized.split()
     if len(words_norm) > 150:
         truncated = " ".join(words_norm[:150])
@@ -77,14 +69,13 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    # --- Tambahkan BOS di awal ---
     output["words"].append(phoneme_tokenizer.bos_token)
     output["phonemes"].append(phoneme_tokenizer.bos_token)
     output["bpe_ids"].append([text_tokenizer.bos_id])
 
     # Parse character by character untuk track spacing
     i = 0
-    prev_was_space = False  # Track apakah karakter sebelumnya adalah spasi
+    prev_was_space = False  
     
     while i < len(normalized):
         # Skip whitespace dan tandai bahwa kita melewati spasi
@@ -92,8 +83,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
             prev_was_space = True
             i += 1
             continue
-            
-        # Handle punctuation
+
         if normalized[i] in string.punctuation:
             punct = normalized[i]
             
@@ -103,8 +93,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
                 output["phonemes"].append(phoneme_tokenizer.space_token)
                 space_bpe = text_tokenizer.encode_word(" ")
                 output["bpe_ids"].append(space_bpe)
-            
-            # Process punctuation
+
             bpe_ids = text_tokenizer.encode_word(punct)
             if len(bpe_ids) == 0:
                 bpe_ids = [text_tokenizer.unk_id]
@@ -123,7 +112,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
             i += 1
         word = normalized[word_start:i]
         
-        if not word:  # Safety check
+        if not word: 
             continue
         
         # Tambahkan space token jika ada spasi sebelum word ini (kecuali di awal)
@@ -146,7 +135,6 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         
         prev_was_space = False
 
-    # --- Tambahkan EOS di akhir ---
     output["words"].append(phoneme_tokenizer.eos_token)
     output["phonemes"].append(phoneme_tokenizer.eos_token)
     output["bpe_ids"].append([text_tokenizer.eos_id])

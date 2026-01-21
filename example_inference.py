@@ -5,9 +5,6 @@ from text_tokenizer import TextTokenizer
 from phoneme_tokenizer import PhonemeTokenizer
 from phonemize import phonemize
 
-
-# ==================== MLM MASKING FUNCTIONS ====================
-
 def apply_mlm_masking(
     input_ids: torch.Tensor,
     pad_id: int,
