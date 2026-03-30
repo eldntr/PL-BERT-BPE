@@ -15,7 +15,7 @@ from torch.utils.data.distributed import DistributedSampler
 from datasets import load_from_disk
 
 from text_tokenizer import TextTokenizer
-from phoneme_tokenizer import PhonemeTokenizer
+from text_utils import TextCleaner
 from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
 
@@ -69,7 +69,7 @@ def train():
 
     bpe_vocab_size = len(text_tokenizer)
 
-    phoneme_tokenizer = PhonemeTokenizer.load(phoneme_vocab_path)
+    phoneme_tokenizer = TextCleaner()
     phoneme_vocab_size = phoneme_tokenizer.vocab_size
 
     if is_main_process:

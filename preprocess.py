@@ -4,13 +4,13 @@ import glob
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 
 from text_tokenizer import TextTokenizer
-from phoneme_tokenizer import PhonemeTokenizer
+from text_utils import TextCleaner
 from phonemize import phonemize
 from build_pruned_vocab import build_pruned_vocab
 
 text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
-phoneme_tokenizer = PhonemeTokenizer()
+phoneme_tokenizer = TextCleaner()
 
 parquet_folder = "wikipedia.id"
 parquet_files = glob.glob(f"{parquet_folder}/*.parquet")
@@ -74,12 +74,7 @@ dataset = concatenate_datasets(shards)
 
 dataset = dataset.filter(lambda ex: len(ex["words"]) > 0)
 
-print("Building phoneme vocabulary from processed data...")
-for example in dataset:
-    for phoneme_str in example["phonemes"]:
-        phoneme_tokenizer.build_from_sentence(phoneme_str)
-
-print(f"Total phonemes in vocab: {phoneme_tokenizer.vocab_size}")
+# Symbols are fixed in text_utils.TextCleaner, so no need to build vocabulary or save it.
 
 dataset_output_dir = "wikipedia-50"
 dataset.save_to_disk(dataset_output_dir)
@@ -97,8 +92,8 @@ test_dataset.save_to_disk(test_dir)
 print(f"Saved training set ({len(train_dataset)} examples) to {train_dir}")
 print(f"Saved test set ({len(test_dataset)} examples) to {test_dir}")
 
-phoneme_tokenizer.save(f"{dataset_output_dir}/phoneme_vocab.json")
-print(f"Saved phoneme vocab to {dataset_output_dir}/phoneme_vocab.json")
+# phoneme_tokenizer.save(f"{dataset_output_dir}/phoneme_vocab.json")
+# print(f"Saved phoneme vocab to {dataset_output_dir}/phoneme_vocab.json")
 
 build_pruned_vocab(dataset_path=dataset_output_dir)
 print(f"Built and saved pruned BPE vocab map to {dataset_output_dir}/bpe_vocab_map.json")

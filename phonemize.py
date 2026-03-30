@@ -131,11 +131,11 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
 
 if __name__ == "__main__":
     from text_tokenizer import TextTokenizer
-    from phoneme_tokenizer import PhonemeTokenizer
+    from text_utils import TextCleaner
 
     # Contoh penggunaan
     text_tok = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
-    phon_tok = PhonemeTokenizer()
+    phon_tok = TextCleaner()
 
     text = "Halo, nama saya Budi. Saya sedang belajar pemrograman."
     res = phonemize(text, text_tok, phon_tok)
