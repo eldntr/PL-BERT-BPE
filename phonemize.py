@@ -1,6 +1,7 @@
 import re
-import subprocess
 import warnings
+from phonemizer.backend import EspeakBackend
+from phonemizer.separator import Separator
 import string
 from functools import lru_cache
 
@@ -20,30 +21,24 @@ def detect_lang(word: str) -> str:
     return "en" if result == Language.ENGLISH else "id"
 
 
+# Initialize backends globally for better performance
+backend_en = EspeakBackend(language='en-us', preserve_punctuation=True, with_stress=True)
+backend_id = EspeakBackend(language='id', preserve_punctuation=True, with_stress=True)
+global_separator = Separator(phone=" ", word="")
+
 @lru_cache(maxsize=100_000)
-def phonemize_word_espeak(word: str, ipa=True, keep_stress=False, sep=" "):
-    """Return phoneme string (IPA) for 1 word."""
+def phonemize_word(word: str, keep_stress=False):
+    """Return phoneme string (IPA) for 1 word using phonemizer."""
     lang = detect_lang(word)
-    voice = "en-us" if lang == "en" else "id"
-
-    cmd = ["espeak-ng", "-v", voice, "-q", f"--sep={sep}"]
-
-    if ipa:
-        cmd.insert(3, "--ipa")
-    else:
-        cmd.insert(3, "-x")
-
-    cmd.append(word)
-
-    try:
-        out = subprocess.run(cmd, capture_output=True, timeout=5)
-        phon = out.stdout.decode("utf-8", errors="ignore").strip()
-        phon = phon.replace("\ufeff", "")
-        if not keep_stress:
-            phon = re.sub(r"[ˈˌ]", "", phon)
-        return phon
-    except:
-        return word
+    backend = backend_en if lang == "en" else backend_id
+    
+    # Process word with separator
+    phon = backend.phonemize([word], separator=global_separator, strip=True)[0]
+    
+    if not keep_stress:
+        phon = re.sub(r"[ˈˌ]", "", phon)
+        
+    return phon
 
 
 def phonemize(text, text_tokenizer, phoneme_tokenizer):
@@ -69,10 +64,6 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    output["words"].append(phoneme_tokenizer.bos_token)
-    output["phonemes"].append(phoneme_tokenizer.bos_token)
-    output["bpe_ids"].append([text_tokenizer.bos_id])
-
     # Parse character by character untuk track spacing
     i = 0
     prev_was_space = False  
@@ -88,7 +79,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
             punct = normalized[i]
             
             # Jika ada spasi sebelum punctuation (rare case), tambahkan space token
-            if prev_was_space and len(output["phonemes"]) > 1:  # > 1 karena sudah ada BOS
+            if prev_was_space and len(output["phonemes"]) > 0:  
                 output["words"].append(" ")
                 output["phonemes"].append(phoneme_tokenizer.space_token)
                 space_bpe = text_tokenizer.encode_word(" ")
@@ -116,7 +107,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
             continue
         
         # Tambahkan space token jika ada spasi sebelum word ini (kecuali di awal)
-        if prev_was_space and len(output["phonemes"]) > 1:  # > 1 karena sudah ada BOS
+        if prev_was_space and len(output["phonemes"]) > 0:  
             output["words"].append(" ")
             output["phonemes"].append(phoneme_tokenizer.space_token)
             space_bpe = text_tokenizer.encode_word(" ")
@@ -127,7 +118,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         if len(bpe_ids) == 0:
             bpe_ids = [text_tokenizer.unk_id]
         
-        phon_str = phonemize_word_espeak(word, ipa=True, keep_stress=False, sep=" ")
+        phon_str = phonemize_word(word, keep_stress=False)
         
         output["words"].append(word)
         output["phonemes"].append(phon_str)
@@ -135,8 +126,23 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         
         prev_was_space = False
 
-    output["words"].append(phoneme_tokenizer.eos_token)
-    output["phonemes"].append(phoneme_tokenizer.eos_token)
-    output["bpe_ids"].append([text_tokenizer.eos_id])
-
     return output
+
+
+if __name__ == "__main__":
+    from text_tokenizer import TextTokenizer
+    from phoneme_tokenizer import PhonemeTokenizer
+
+    # Contoh penggunaan
+    text_tok = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
+    phon_tok = PhonemeTokenizer()
+
+    text = "Halo, nama saya Budi. Saya sedang belajar pemrograman."
+    res = phonemize(text, text_tok, phon_tok)
+
+    print("--- Phomemize Result ---")
+    print(f"Original: {res['before']}")
+    print(f"Normalized: {res['after']}")
+    print(f"Words: {res['words']}")
+    print(f"Phonemes: {res['phonemes']}")
+    print(f"BPE IDs: {res['bpe_ids']}")

@@ -18,8 +18,6 @@ def build_pruned_vocab(dataset_path="wiki_phoneme_final_v2"):
 
     special_ids = {
         tokenizer.pad_id, 
-        tokenizer.eos_id, 
-        tokenizer.bos_id, 
         tokenizer.unk_id
     }
 

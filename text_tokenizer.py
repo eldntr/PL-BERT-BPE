@@ -10,8 +10,6 @@ class TextTokenizer:
             self.tokenizer.add_special_tokens({"pad_token": "<pad>"})
 
         self.pad_id = self.tokenizer.pad_token_id
-        self.eos_id = self.tokenizer.eos_token_id
-        self.bos_id = self.tokenizer.bos_token_id
         self.unk_id = self.tokenizer.unk_token_id
 
         self.map_file = map_file
