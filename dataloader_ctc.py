@@ -2,6 +2,8 @@ import torch
 from torch.utils.data import Dataset
 import random
 
+# TO DO:membatasi random token agar tidak memilih special token,
+
 class FilePathDataset(Dataset):
     def __init__(
         self,
@@ -19,42 +21,69 @@ class FilePathDataset(Dataset):
         self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
         self.pad_id = phoneme_tokenizer.pad_id
         self.max_position_embeddings = max_position_embeddings
-        
-        print(f"Filtering samples longer than {max_position_embeddings} tokens...")
-        valid_indices = []
-        skipped_count = 0
-        
-        for idx in range(len(dataset)):
-            ex = dataset[idx]
-            phoneme_words = ex["phonemes"]
-
-            total_phon_len = sum(len(self.phoneme_tokenizer.encode(phon_str)) for phon_str in phoneme_words)
-            
-            if total_phon_len <= max_position_embeddings:
-                valid_indices.append(idx)
-            else:
-                skipped_count += 1
-        
-        print(f"Filtered dataset: {len(valid_indices)}/{len(dataset)} samples valid ({skipped_count} skipped)")
-        
-        self.valid_indices = valid_indices
 
     def __len__(self):
-        return len(self.valid_indices)
+        return len(self.dataset)
 
     def __getitem__(self, idx):
-        original_idx = self.valid_indices[idx]
-        ex = self.dataset[original_idx]
+        ex = self.dataset[idx]
 
         phoneme_words = ex["phonemes"]       
         bpe_words     = ex["bpe_ids"]        
+
+        # Calculate phoneme IDs and lengths for each word
+        phon_ids_per_word = [self.phoneme_tokenizer.encode(p) for p in phoneme_words]
+        word_lens = [len(p_ids) for p_ids in phon_ids_per_word]
+        total_len = sum(word_lens)
+
+        if total_len > self.max_position_embeddings:
+            # Random truncate: pick a contiguous window of words that fits
+            num_words = len(phoneme_words)
+            i = random.randint(0, num_words - 1)
+            
+            curr_len = 0
+            start_idx = i
+            end_idx = i
+            
+            # Forward expand
+            for k in range(i, num_words):
+                if curr_len + word_lens[k] <= self.max_position_embeddings:
+                    curr_len += word_lens[k]
+                    end_idx = k + 1
+                else:
+                    break
+            
+            # Backward expand if there's room left
+            for k in range(start_idx - 1, -1, -1):
+                if curr_len + word_lens[k] <= self.max_position_embeddings:
+                    curr_len += word_lens[k]
+                    start_idx = k
+                else:
+                    break
+            
+            # Final window: [start_idx, end_idx)
+            # Note: in the extreme case where a single word is longer than max_position_embeddings,
+            # end_idx might be start_idx or start_idx + 1 if we allow at least one word.
+            # Here we ensure at least one word is taken if it's the start word.
+            if start_idx == end_idx and num_words > 0:
+                end_idx = start_idx + 1
+                # We'll truncate this single word later if needed
+            
+            phon_ids_per_word = phon_ids_per_word[start_idx:end_idx]
+            bpe_words = bpe_words[start_idx:end_idx]
 
         flat_phon = []
         word_spans = []   # (start, end) indexes
         curr = 0
 
-        for phoneme_str in phoneme_words:
-            phon_ids = self.phoneme_tokenizer.encode(phoneme_str)
+        for phon_ids in phon_ids_per_word:
+            # Truncate if a single word is still too long (rare)
+            if curr + len(phon_ids) > self.max_position_embeddings:
+                phon_ids = phon_ids[:self.max_position_embeddings - curr]
+            
+            if not phon_ids:
+                break
+
             start = curr
             flat_phon.extend(phon_ids)
             curr += len(phon_ids)
