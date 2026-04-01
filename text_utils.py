@@ -23,9 +23,10 @@ _special = ['[PAD]', '<mask>', '[UNK]']
 # Export all symbols:
 symbols = _special + _multi_symbols + list(_punctuation) + list(_letters) + list(_letters_ipa)
 
-dicts = {}
-for i in range(len((symbols))):
-    dicts[symbols[i]] = i
+# Remove duplicates while preserving order
+symbols = list(dict.fromkeys(symbols))
+
+dicts = {s: i for i, s in enumerate(symbols)}
 
 class TextCleaner:
     def __init__(self, dummy=None):
@@ -41,6 +42,13 @@ class TextCleaner:
         if not text:
             return []
         
+        # Support list of strings
+        if isinstance(text, list):
+            ids = []
+            for t in text:
+                ids.extend(self.encode(t))
+            return ids
+
         # Direct match for special tokens or single characters
         if text in self.word_index_dictionary:
             return [self.word_index_dictionary[text]]

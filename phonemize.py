@@ -10,36 +10,28 @@ from text_normalize import normalize_text
 
 warnings.filterwarnings("ignore", message="Trying to detect language from a single word.")
 
-languages = [Language.ENGLISH, Language.INDONESIAN]
-detector = LanguageDetectorBuilder.from_languages(*languages).build()
+class Phonemizer:
+    def __init__(self):
+        self.languages = [Language.ENGLISH, Language.INDONESIAN]
+        self.detector = LanguageDetectorBuilder.from_languages(*self.languages).build()
+        self.backend_en = EspeakBackend(language='en-us', preserve_punctuation=True, with_stress=True)
+        self.backend_id = EspeakBackend(language='id', preserve_punctuation=True, with_stress=True)
 
-@lru_cache(maxsize=100_000)
-def detect_lang(word: str) -> str:
-    result = detector.detect_language_of(word)
-    if result is None:
-        return "id"
-    return "en" if result == Language.ENGLISH else "id"
+    @lru_cache(maxsize=100_000)
+    def detect_lang(self, word: str) -> str:
+        result = self.detector.detect_language_of(word)
+        if result is None:
+            return "id"
+        return "en" if result == Language.ENGLISH else "id"
 
+    @lru_cache(maxsize=100_000)
+    def __call__(self, word: str):
+        lang = self.detect_lang(word)
+        backend = self.backend_en if lang == "en" else self.backend_id
+        phon = backend.phonemize([word], strip=True)[0]
+        return phon
 
-# Initialize backends globally for better performance
-backend_en = EspeakBackend(language='en-us', preserve_punctuation=True, with_stress=True)
-backend_id = EspeakBackend(language='id', preserve_punctuation=True, with_stress=True)
-global_separator = Separator(phone=" ", word="")
-
-@lru_cache(maxsize=100_000)
-def phonemize_word(word: str, keep_stress=False):
-    """Return phoneme string (IPA) for 1 word using phonemizer."""
-    lang = detect_lang(word)
-    backend = backend_en if lang == "en" else backend_id
-    
-    # Process word with separator
-    phon = backend.phonemize([word], separator=global_separator, strip=True)[0]
-    
-    if not keep_stress:
-        phon = re.sub(r"[ˈˌ]", "", phon)
-        
-    return phon
-
+phonemizer_instance = Phonemizer()
 
 def phonemize(text, text_tokenizer, phoneme_tokenizer):
 
@@ -118,7 +110,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         if len(bpe_ids) == 0:
             bpe_ids = [text_tokenizer.unk_id]
         
-        phon_str = phonemize_word(word, keep_stress=False)
+        phon_str = phonemizer_instance(word)
         
         output["words"].append(word)
         output["phonemes"].append(phon_str)
@@ -146,3 +138,6 @@ if __name__ == "__main__":
     print(f"Words: {res['words']}")
     print(f"Phonemes: {res['phonemes']}")
     print(f"BPE IDs: {res['bpe_ids']}")
+
+    print(phon_tok.encode(" "))
+    print(phon_tok.encode(res['phonemes']))
