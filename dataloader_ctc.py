@@ -9,14 +9,14 @@ class FilePathDataset(Dataset):
         self,
         dataset,                   
         phoneme_tokenizer,      
-        text_tokenizer,           
+        token_maps=None,           
         mlm_prob=0.15,            
         mask_token_id=None,       
         max_position_embeddings=1536,  
     ):
         self.dataset = dataset
         self.phoneme_tokenizer = phoneme_tokenizer
-        self.text_tokenizer = text_tokenizer
+        self.token_maps = token_maps
         self.mlm_prob = mlm_prob
         self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
         self.pad_id = phoneme_tokenizer.pad_id
@@ -92,8 +92,10 @@ class FilePathDataset(Dataset):
 
         flat_bpe = []
         for ids in bpe_words:
-            if self.text_tokenizer.use_pruning:
-                ids = [self.text_tokenizer.original_to_compact[i] for i in ids]
+            if self.token_maps is not None:
+                # User's requested format: token_maps[w]['token']
+                # This assumes all IDs in bpe_words were included in the pruned vocab.
+                ids = [self.token_maps[i]['token'] for i in ids]
             
             flat_bpe.extend(ids)
 

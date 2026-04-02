@@ -14,7 +14,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from datasets import load_from_disk
 
-from text_tokenizer import TextTokenizer
+from transformers import AutoTokenizer
 from text_utils import TextCleaner
 from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
@@ -65,9 +65,21 @@ def train():
         print(f"Total effective batch size: {batch_size * grad_accum_steps * world_size}")
         print(f"Device: {device}")
 
-    text_tokenizer = TextTokenizer(text_tokenizer_name, map_file=f"{dataset_path}/bpe_vocab_map.json")
-
-    bpe_vocab_size = len(text_tokenizer)
+    import pickle
+    token_maps_path = "token_maps.pkl" 
+    if os.path.exists(token_maps_path):
+        if is_main_process:
+            print(f"Loading token maps from {token_maps_path}")
+        with open(token_maps_path, 'rb') as f:
+            token_maps = pickle.load(f)
+        bpe_vocab_size = len(token_maps)
+    else:
+        # Fallback to AutoTokenizer if pickle is missing
+        if is_main_process:
+            print(f"Warning: {token_maps_path} not found. Using full tokenizer vocab.")
+        tokenizer = AutoTokenizer.from_pretrained(text_tokenizer_name)
+        token_maps = None
+        bpe_vocab_size = len(tokenizer)
 
     phoneme_tokenizer = TextCleaner()
     phoneme_vocab_size = phoneme_tokenizer.vocab_size
@@ -82,7 +94,13 @@ def train():
     if is_main_process:
         print("Training dataset size:", len(hf_train_dataset))
 
-    train_dataset = FilePathDataset(hf_train_dataset, phoneme_tokenizer, text_tokenizer, mlm_prob=mlm_prob, max_position_embeddings=1024)
+    train_dataset = FilePathDataset(
+        hf_train_dataset, 
+        phoneme_tokenizer, 
+        token_maps=token_maps, 
+        mlm_prob=mlm_prob, 
+        max_position_embeddings=1024
+    )
 
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
     train_sampler = DistributedSampler(
