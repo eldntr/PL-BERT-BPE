@@ -33,20 +33,9 @@ class Phonemizer:
 
 phonemizer_instance = Phonemizer()
 
-def phonemize(text, text_tokenizer, phoneme_tokenizer):
+def phonemize(text, tokenizer):
 
     normalized = normalize_text(text)
-    
-    # Truncate setelah normalize: batasi ke <150 kata, potong di titik terdekat jika ada
-    # Optional, sesuaikan dengan resources anda :>
-    words_norm = normalized.split()
-    if len(words_norm) > 150:
-        truncated = " ".join(words_norm[:150])
-        last_period = truncated.rfind(".")
-        if last_period > 0:
-            normalized = truncated[:last_period + 1]
-        else:
-            normalized = truncated
     
     output = {
         "before": text,
@@ -56,12 +45,10 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         "phonemes": [],
     }
 
-    # Parse character by character untuk track spacing
     i = 0
     prev_was_space = False  
     
     while i < len(normalized):
-        # Skip whitespace dan tandai bahwa kita melewati spasi
         if normalized[i].isspace():
             prev_was_space = True
             i += 1
@@ -70,16 +57,13 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         if normalized[i] in string.punctuation:
             punct = normalized[i]
             
-            # Jika ada spasi sebelum punctuation (rare case), tambahkan space token
             if prev_was_space and len(output["phonemes"]) > 0:  
                 output["words"].append(" ")
-                output["phonemes"].append(phoneme_tokenizer.space_token)
-                space_bpe = text_tokenizer.encode_word(" ")
+                output["phonemes"].append(" ")
+                space_bpe = tokenizer.encode(" ", add_special_tokens=False)
                 output["bpe_ids"].append(space_bpe)
 
-            bpe_ids = text_tokenizer.encode_word(punct)
-            if len(bpe_ids) == 0:
-                bpe_ids = [text_tokenizer.unk_id]
+            bpe_ids = tokenizer.encode(punct, add_special_tokens=False)
             
             output["words"].append(punct)
             output["phonemes"].append(punct)
@@ -88,8 +72,7 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
             prev_was_space = False
             i += 1
             continue
-        
-        # Handle word (alphanumeric + apostrophe)
+
         word_start = i
         while i < len(normalized) and not normalized[i].isspace() and normalized[i] not in string.punctuation:
             i += 1
@@ -97,18 +80,14 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
         
         if not word: 
             continue
-        
-        # Tambahkan space token jika ada spasi sebelum word ini (kecuali di awal)
+ 
         if prev_was_space and len(output["phonemes"]) > 0:  
             output["words"].append(" ")
-            output["phonemes"].append(phoneme_tokenizer.space_token)
-            space_bpe = text_tokenizer.encode_word(" ")
+            output["phonemes"].append(" ")
+            space_bpe = tokenizer.encode(" ", add_special_tokens=False)
             output["bpe_ids"].append(space_bpe)
-        
-        # Process word
-        bpe_ids = text_tokenizer.encode_word(word)
-        if len(bpe_ids) == 0:
-            bpe_ids = [text_tokenizer.unk_id]
+
+        bpe_ids = tokenizer.encode(word, add_special_tokens=False)
         
         phon_str = phonemizer_instance(word)
         
@@ -122,15 +101,14 @@ def phonemize(text, text_tokenizer, phoneme_tokenizer):
 
 
 if __name__ == "__main__":
-    from text_tokenizer import TextTokenizer
     from text_utils import TextCleaner
+    from transformers import AutoTokenizer
 
-    # Contoh penggunaan
-    text_tok = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
+    text_tok = AutoTokenizer.from_pretrained("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
     phon_tok = TextCleaner()
 
     text = "Halo, nama saya Budi. Saya sedang belajar pemrograman."
-    res = phonemize(text, text_tok, phon_tok)
+    res = phonemize(text, text_tok)
 
     print("--- Phomemize Result ---")
     print(f"Original: {res['before']}")

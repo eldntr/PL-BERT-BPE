@@ -3,12 +3,12 @@ import json
 import glob
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 
-from text_tokenizer import TextTokenizer
+from transformers import AutoTokenizer
 from text_utils import TextCleaner
 from phonemize import phonemize
 from build_pruned_vocab import build_pruned_vocab
 
-text_tokenizer = TextTokenizer("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
+tokenizer = AutoTokenizer.from_pretrained("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
 
 phoneme_tokenizer = TextCleaner()
 
@@ -33,7 +33,7 @@ def process_shard(idx):
     shard = dataset.shard(num_shards, idx)
 
     processed = shard.map(
-        lambda ex: phonemize(ex["text"], text_tokenizer, phoneme_tokenizer),
+        lambda ex: phonemize(ex["text"], tokenizer),
         remove_columns=["text"],
         load_from_cache_file=False
     )
