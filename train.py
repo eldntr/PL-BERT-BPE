@@ -1,245 +1,160 @@
 import os
-import json
-import math
-import random
-from dataclasses import dataclass
+import shutil
+import os.path as osp
+import pickle
+import yaml
 
 import torch
-import torch.nn as nn
+from torch import nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
+
+from accelerate import Accelerator
+from accelerate.utils import LoggerType
+from accelerate import DistributedDataParallelKwargs
+
+from torch.optim import AdamW
+from transformers import AlbertConfig, AlbertModel
+from transformers import AutoTokenizer
+
+from model import MultiTaskModel
+from dataloader import build_dataloader
+from utils import length_to_mask, scan_checkpoint
 
 from datasets import load_from_disk
 
-from transformers import AutoTokenizer
-from text_utils import TextCleaner
-from dataloader_ctc import FilePathDataset, collate_fn
-from model import MultiTaskModel
+import pickle
 
-import yaml
+config_path = "Configs/config.yml" 
+config = yaml.safe_load(open(config_path))
 
-def setup_ddp():
-    """Initialize DDP environment"""
-    dist.init_process_group(backend="nccl")
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    return local_rank
+with open(config['dataset_params']['token_maps'], 'rb') as handle:
+    token_maps = pickle.load(handle)
 
-def cleanup_ddp():
-    """Cleanup DDP"""
-    dist.destroy_process_group()
+tokenizer = AutoTokenizer.from_pretrained(config['dataset_params']['tokenizer'])
+criterion = nn.CrossEntropyLoss()
+
+num_steps = config['num_steps']
+log_interval = config['log_interval']
+save_interval = config['save_interval']
 
 def train():
-    local_rank = setup_ddp()
-    world_size = dist.get_world_size()
-    is_main_process = (local_rank == 0)
-
-    # Load configuration
-    config_path = "Configs/config.yml"
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
-    if is_main_process:
-        print(f"🚀 Training with {world_size} GPUs (DDP)")
-  
-    dataset_path = config["data_folder"]
-    train_dataset_path = f"{dataset_path}/train"
+    curr_steps = 0
     
-    dataset_params = config["dataset_params"]
-    model_params = config["model_params"]
+    dataset = load_from_disk(config["data_folder"])
+    if "train" in dataset:
+        dataset = dataset["train"]
 
-    # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
+    log_dir = config['log_dir']
+    if not osp.exists(log_dir): 
+        os.makedirs(log_dir, exist_ok=True)
+    shutil.copy(config_path, osp.join(log_dir, osp.basename(config_path)))
+    
     batch_size = config["batch_size"]
-    grad_accum_steps = config.get("grad_accum_steps", 64)         
-    max_steps = config["num_steps"]
-    save_every = config["save_interval"]
-    log_every = config["log_interval"]
+    train_loader = build_dataloader(dataset, 
+                                    batch_size=batch_size, 
+                                    num_workers=4, 
+                                    dataset_config=config['dataset_params'])
 
-    lr_max = config.get("learning_rate", 5e-4)
-    warmup_steps = config.get("warmup_steps", 10000)
+    albert_base_configuration = AlbertConfig(**config['model_params'])
     
-    lambda_ctc = config.get("lambda_ctc", 1.0)
+    bert_encoder = AlbertModel(albert_base_configuration)
+    bert = MultiTaskModel(bert_encoder, 
+                          num_vocab=1 + max([m['token'] for m in token_maps.values()]), 
+                          num_tokens=config['model_params']['vocab_size'],
+                          hidden_size=config['model_params']['hidden_size'])
+    
+    load = True
+    try:
+        ckpts = [f for f in os.listdir(log_dir) if f.startswith("step_") and f.endswith(".t7")]
+        iters = sorted([int(f.split('_')[-1].split('.')[0]) for f in ckpts])[-1]
+    except:
+        iters = 0
+        load = False
+    
+    optimizer = AdamW(bert.parameters(), lr=config.get('learning_rate', 1e-4))
+    
+    accelerator = Accelerator(mixed_precision=config['mixed_precision'], split_batches=True, kwargs_handlers=[ddp_kwargs])
+    
+    if load:
+        checkpoint = torch.load(os.path.join(log_dir, f"step_{iters}.t7"), map_location='cpu')
+        state_dict = checkpoint['net']
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k.replace('module.', '') # remove `module.`
+            new_state_dict[name] = v
 
-    device = torch.device(f"cuda:{local_rank}")
+        bert.load_state_dict(new_state_dict, strict=False)
+        accelerator.print(f'Checkpoint loaded from step {iters}.')
+        if 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
     
-    if is_main_process:
-        print(f"Per-GPU batch size: {batch_size}")
-        print(f"Gradient accumulation steps: {grad_accum_steps}")
-        print(f"Total effective batch size: {batch_size * grad_accum_steps * world_size}")
-        print(f"Device: {device}")
-
-    if is_main_process:
-        print("Loading training dataset from", train_dataset_path)
-    hf_train_dataset = load_from_disk(train_dataset_path)
-    
-    train_dataset = FilePathDataset(
-        hf_train_dataset, 
-        token_maps=dataset_params["token_maps"],
-        tokenizer=dataset_params["tokenizer"],
-        word_separator=dataset_params["word_separator"],
-        token_separator=dataset_params["token_separator"],
-        token_mask=dataset_params["token_mask"],
-        token_pad=dataset_params["token_pad"],
-        max_mel_length=dataset_params["max_mel_length"],
-        word_mask_prob=dataset_params["word_mask_prob"],
-        phoneme_mask_prob=dataset_params["phoneme_mask_prob"],
-        replace_prob=dataset_params["replace_prob"]
+    bert, optimizer, train_loader = accelerator.prepare(
+        bert, optimizer, train_loader
     )
 
-    bpe_vocab_size = len(train_dataset.token_maps)
-    phoneme_vocab_size = train_dataset.text_cleaner.vocab_size
+    accelerator.print('Start training...')
 
-    if is_main_process:
-        print("Phoneme vocab size:", phoneme_vocab_size)
-        print("Pruned BPE vocab size:", bpe_vocab_size) 
-        print("Training dataset size:", len(hf_train_dataset))
-
-    # DistributedSampler akan membagi data ke semua GPU secara otomatis
-    train_sampler = DistributedSampler(
-        train_dataset,
-        num_replicas=world_size,
-        rank=local_rank,
-        shuffle=True,
-        seed=42
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        sampler=train_sampler,
-        num_workers=4,
-        collate_fn=lambda batch: collate_fn(
-            batch, 
-            train_dataset.text_cleaner, 
-            word_mask_prob=train_dataset.word_mask_prob,
-            phoneme_mask_prob=train_dataset.phoneme_mask_prob,
-            replace_prob=train_dataset.replace_prob
-        ),
-        pin_memory=True
-    )
-
-    model = MultiTaskModel(
-        phoneme_vocab_size=phoneme_vocab_size,
-        bpe_vocab_size=bpe_vocab_size,
-        hidden_size=model_params["hidden_size"],
-        num_layers=model_params["num_hidden_layers"],
-        num_heads=model_params["num_attention_heads"],
-        intermediate_size=model_params["intermediate_size"],
-        max_position_embeddings=model_params["max_position_embeddings"],
-    ).to(device)
-
-    model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-7)
-
-    def get_lr_scale(step):
-        """Linear warmup + cosine decay"""
-        if step < warmup_steps:
-            # Linear warmup dari 0 ke 1
-            return float(step) / float(max(1, warmup_steps))
-        else:
-            # Cosine decay setelah warmup
-            progress = float(step - warmup_steps) / float(max(1, max_steps - warmup_steps))
-            return max(0.1, 0.5 * (1.0 + math.cos(math.pi * progress)))
+    running_loss = 0
     
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, get_lr_scale)
-    
-    ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
-
-    global_step = 0
-    model.train()
-
-    while global_step < max_steps:
-        # Set epoch untuk sampler agar shuffle berbeda setiap epoch
-        train_sampler.set_epoch(global_step // len(train_loader))
-        
-        for batch in train_loader:
-            if global_step >= max_steps:
-                break
-                
-            global_step += 1
-
-            phoneme_input = batch["phoneme_input"].to(device)      # [B, T]
-            mlm_labels     = batch["mlm_labels"].to(device)         # [B, T]
-            attention_mask = batch["attention_mask"].to(device)     # [B, T]
-
-            ctc_targets    = batch["ctc_targets"].to(device)        # [sum_L]
-            input_lengths  = batch["input_lengths"].to(device)      # [B]
-            target_lengths = batch["target_lengths"].to(device)     # [B]
-
-            # Lazy zero_grad - hanya lakukan setelah accumulation lengkap
-            if global_step % grad_accum_steps == 1:
-                optimizer.zero_grad()
-
-            mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
-
-            B, T, Vp = mlm_logits.shape
-            mlm_loss = F.cross_entropy(
-                mlm_logits.view(B*T, Vp),
-                mlm_labels.view(B*T),
-                ignore_index=-100
-            )
+    while iters < num_steps:
+        for batch in train_loader:        
+            curr_steps += 1
             
-            ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
+            words, labels, phonemes, input_lengths, masked_indices = batch
+            text_mask = length_to_mask(input_lengths)
+            
+            tokens_pred, words_pred = bert(phonemes, attention_mask=(~text_mask).int())
+            
+            loss_vocab = 0
+            for _s2s_pred, _text_input, _text_length, _masked_indices in zip(words_pred, words, input_lengths, masked_indices):
+                target_len = min(_s2s_pred.size(0), _text_input.size(0), _text_length.item())
+                loss_vocab += criterion(_s2s_pred[:target_len], _text_input[:target_len])
+            loss_vocab /= words.size(0)
+            
+            loss_token = 0
+            sizes = 0
+            for _s2s_pred, _text_input, _text_length, _masked_indices in zip(tokens_pred, labels, input_lengths, masked_indices):
+                if len(_masked_indices) > 0:
+                    m_idx = _masked_indices[_masked_indices < _text_length]
+                    if len(m_idx) > 0:
+                        loss_token += criterion(_s2s_pred[m_idx], _text_input[m_idx]) 
+                        sizes += 1
+            
+            if sizes > 0:
+                loss_token /= sizes
+            else:
+                loss_token = torch.tensor(0.0, device=accelerator.device)
 
-            # Shift BPE ids by +1 (0 = blank)
-            ctc_targets_shifted = ctc_targets + 1
+            loss = loss_vocab + loss_token
 
-            ctc_loss = ctc_loss_fn(
-                ctc_log_probs,
-                ctc_targets_shifted,
-                input_lengths,
-                target_lengths
-            )
+            optimizer.zero_grad()
+            accelerator.backward(loss)
+            optimizer.step()
 
-            loss = mlm_loss + lambda_ctc * ctc_loss
+            running_loss += loss.item()
 
-            loss_normalized = loss / grad_accum_steps
-            loss_normalized.backward()
-
-            # Update weights hanya setiap grad_accum_steps
-            if global_step % grad_accum_steps == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            iters = iters + 1
+            if iters % log_interval == 0:
+                accelerator.print('Step [%d/%d], Loss: %.5f, Vocab Loss: %.5f, Token Loss: %.5f'
+                        %(iters, num_steps, running_loss / log_interval, loss_vocab, loss_token))
+                running_loss = 0
                 
-                # Manual LR update untuk warmup + cosine decay
-                lr_scale = get_lr_scale(global_step)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = lr_max * lr_scale
-                
-                optimizer.step()
-                optimizer.zero_grad()
-                scheduler.step()  
+            if iters % save_interval == 0:
+                accelerator.print('Saving..')
+                state = {
+                    'net':  accelerator.get_state_dict(bert),
+                    'step': iters,
+                    'optimizer': optimizer.state_dict(),
+                }
+                accelerator.save(state, os.path.join(log_dir, f'step_{iters}.t7'))
 
-            if is_main_process and global_step % log_every == 0:
-                current_lr = optimizer.param_groups[0]['lr']
-                print(
-                    f"Step {global_step}/{max_steps} | "
-                    f"Loss: {loss.item():.4f} | LR: {current_lr:.2e} | MLM: {mlm_loss.item():.4f} | CTC: {ctc_loss.item():.4f}"
-                )
-
-            if is_main_process and global_step % save_every == 0:
-                ckpt_path = f"checkpoint_step_{global_step}.pt"
-                torch.save({
-                    "model_state": model.module.state_dict(),  
-                    "optimizer_state": optimizer.state_dict(),
-                    "global_step": global_step,
-                }, ckpt_path)
-                print(f"✓ Saved checkpoint to {ckpt_path}")
-
-    if is_main_process:
-        final_ckpt_path = f"checkpoint_step_{global_step}_final.pt"
-        torch.save({
-            "model_state": model.module.state_dict(),  
-            "optimizer_state": optimizer.state_dict(),
-            "global_step": global_step,
-        }, final_ckpt_path)
-        print(f"✓ Training complete! Final checkpoint saved to {final_ckpt_path}")
-
-    cleanup_ddp()
-
+            if iters >= num_steps:
+                return 
 
 if __name__ == "__main__":
-    train()
+    from accelerate import notebook_launcher
+    num_processes = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    notebook_launcher(train, args=(), num_processes=num_processes, use_port=33389)

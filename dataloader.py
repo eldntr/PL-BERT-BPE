@@ -79,27 +79,34 @@ class FilePathDataset(Dataset):
             bpe_words = bpe_words[start_idx:end_idx]
 
         flat_phon = []
+        flat_bpe = []
         word_spans = []   # (start, end) indexes
         curr = 0
 
-        for phon_ids in phon_ids_per_word:
+        # We need to align BPE to phonemes for 1-to-1 classification in the requested template
+        for phon_ids, bpe_id_list in zip(phon_ids_per_word, bpe_words):
             if curr + len(phon_ids) > self.max_mel_length:
                 phon_ids = phon_ids[:self.max_mel_length - curr]
             
             if not phon_ids:
                 break
 
+            # Take the first BPE token ID for this word (standard for PL-BERT 1-to-1 alignment)
+            # If your framework expects CTC, this logic should be reversed.
+            if bpe_id_list and self.token_maps is not None:
+                orig_id = bpe_id_list[0]
+                target_bpe_id = self.token_maps[orig_id]['token']
+            else:
+                target_bpe_id = 0 # Padding/Unknown
+
             start = curr
             flat_phon.extend(phon_ids)
+            # Repeat BPE ID for every phoneme in the word
+            flat_bpe.extend([target_bpe_id] * len(phon_ids))
+            
             curr += len(phon_ids)
             end = curr
             word_spans.append((start, end))
-
-        flat_bpe = []
-        for ids in bpe_words:
-            if self.token_maps is not None:
-                ids = [self.token_maps[i]['token'] for i in ids]
-            flat_bpe.extend(ids)
 
         return {
             "phoneme_ids": flat_phon,
@@ -107,6 +114,43 @@ class FilePathDataset(Dataset):
             "bpe_ids": flat_bpe,
         }
 
+
+from torch.utils.data import DataLoader
+from functools import partial
+
+def build_dataloader(dataset, batch_size, num_workers, dataset_config):
+    dataset = FilePathDataset(
+        dataset,
+        token_maps=dataset_config["token_maps"],
+        tokenizer=dataset_config["tokenizer"],
+        word_separator=dataset_config["word_separator"],
+        token_separator=dataset_config["token_separator"],
+        token_mask=dataset_config["token_mask"],
+        token_pad=dataset_config["token_pad"],
+        max_mel_length=dataset_config["max_mel_length"],
+        word_mask_prob=dataset_config["word_mask_prob"],
+        phoneme_mask_prob=dataset_config["phoneme_mask_prob"],
+        replace_prob=dataset_config["replace_prob"]
+    )
+    
+    # We use partial to pass text_cleaner and other params to collate_fn
+    collate = partial(
+        collate_fn, 
+        text_cleaner=dataset.text_cleaner, 
+        word_mask_prob=dataset.word_mask_prob,
+        phoneme_mask_prob=dataset.phoneme_mask_prob,
+        replace_prob=dataset.replace_prob
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=True,
+        collate_fn=collate,
+        pin_memory=True,
+        drop_last=True
+    )
 
 def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, replace_prob=0.5):
 
@@ -122,20 +166,25 @@ def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, 
 
     input_phon = torch.full((B, max_T), pad_id, dtype=torch.long)
     mlm_labels = torch.full((B, max_T), -100, dtype=torch.long)
-    att_mask   = torch.zeros((B, max_T), dtype=torch.long)
+    
+    # We will return original phone IDs for ground truth
+    all_phoneme_labels = torch.full((B, max_T), pad_id, dtype=torch.long)
+    
+    masked_indices_list = []
 
     for i in range(B):
         seq = phon_seqs[i]
         L = len(seq)
         input_phon[i, :L] = torch.tensor(seq)
-        att_mask[i, :L] = 1
+        all_phoneme_labels[i, :L] = torch.tensor(seq)
 
         word_spans = spans[i]
         num_words = len(word_spans)
 
         num_mask = max(1, int(num_words * word_mask_prob))
         chosen = random.sample(range(num_words), num_mask)
-
+        
+        curr_masked_indices = []
         for widx in chosen:
             start, end = word_spans[widx]
             
@@ -147,24 +196,34 @@ def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, 
                 input_phon[i, start:end] = random_ids
 
             mlm_labels[i, start:end] = torch.tensor(seq[start:end])
+            curr_masked_indices.extend(list(range(start, end)))
+        
+        masked_indices_list.append(torch.tensor(curr_masked_indices))
 
-    concat_bpe = []
-    target_lengths = []
-
-    for bpe_ids in bpe_seqs:
-        concat_bpe.extend(bpe_ids)
-        target_lengths.append(len(bpe_ids))
-
-    concat_bpe = torch.tensor(concat_bpe, dtype=torch.long)
-    target_lengths = torch.tensor(target_lengths, dtype=torch.long)
-
+    # BPE ground truth
+    # Template expects 'words' which we'll use for CTC target
+    # Since CTCLoss expects concatenated targets and target_lengths, but the template loops zip(words_pred, words, ...)
+    # the template might expect individual target sequences.
+    bpe_targets = [torch.tensor(b) for b in bpe_seqs]
+    # We should pad them or return as list if loop handles it. Template does _s2s_pred[:_text_length], _text_input[:_text_length].
+    # This implies 1-to-1 or at least consistent indexing.
+    # In PL-BERT-BPE, CTC doesn't have 1-to-1.
+    # But I'll follow the template structure.
+    
+    # input_lengths for CTC and mask
     input_lengths = torch.tensor([len(seq) for seq in phon_seqs], dtype=torch.long)
 
-    return {
-        "phoneme_input": input_phon,        # [B, T]
-        "mlm_labels": mlm_labels,           # [B, T]
-        "attention_mask": att_mask,         # [B, T]
-        "ctc_targets": concat_bpe,          # [sum_targets]
-        "input_lengths": input_lengths,     # [B]
-        "target_lengths": target_lengths,   # [B]
-    }
+    # Return words, labels, phonemes, input_lengths, masked_indices
+    # words = BPE targets
+    # labels = Phoneme targets (MLM)
+    # phonemes = Input Phoneme IDs
+    # input_lengths = Input lengths
+    # masked_indices = Masked indices
+    
+    # We convert BPE to padded tensor for simpler batching if needed, or leave as list
+    # The template uses zip(...) so a list of tensors or a padded tensor is fine.
+    # Let's pad BPE targets.
+    from torch.nn.utils.rnn import pad_sequence
+    words = pad_sequence([torch.tensor(b) for b in bpe_seqs], batch_first=True, padding_value=0)
+
+    return words, all_phoneme_labels, input_phon, input_lengths, masked_indices_list
