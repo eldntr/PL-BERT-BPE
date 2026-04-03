@@ -40,20 +40,21 @@ def train():
   
     dataset_path = "wikipedia-50"
     train_dataset_path = f"{dataset_path}/train"
-    phoneme_vocab_path = f"{dataset_path}/phoneme_vocab.json"
     text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
 
     # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
-    # Dengan batch_size=1 & grad_accum_steps=64 & 4 GPU: effective batch = 1 * 64 * 4 = 256
     batch_size = 1                
     grad_accum_steps = 64         
     max_steps = 1_000_000        
     save_every = 50_000        
 
-    lr_max = 5e-4                 # Peak LR (lebih tinggi untuk model besar)
-    warmup_steps = 10_000         # Warmup 10k steps untuk stabilitas
+    lr_max = 5e-4                 
+    warmup_steps = 10_000         
     
-    mlm_prob = 0.15
+    word_mask_prob = 0.15
+    phoneme_mask_prob = 0.8
+    replace_prob = 0.5
+
     lambda_ctc = 1.0
     log_every = 100
 
@@ -65,42 +66,27 @@ def train():
         print(f"Total effective batch size: {batch_size * grad_accum_steps * world_size}")
         print(f"Device: {device}")
 
-    import pickle
-    token_maps_path = "token_maps.pkl" 
-    if os.path.exists(token_maps_path):
-        if is_main_process:
-            print(f"Loading token maps from {token_maps_path}")
-        with open(token_maps_path, 'rb') as f:
-            token_maps = pickle.load(f)
-        bpe_vocab_size = len(token_maps)
-    else:
-        # Fallback to AutoTokenizer if pickle is missing
-        if is_main_process:
-            print(f"Warning: {token_maps_path} not found. Using full tokenizer vocab.")
-        tokenizer = AutoTokenizer.from_pretrained(text_tokenizer_name)
-        token_maps = None
-        bpe_vocab_size = len(tokenizer)
+    if is_main_process:
+        print("Loading training dataset from", train_dataset_path)
+    hf_train_dataset = load_from_disk(train_dataset_path)
+    
+    train_dataset = FilePathDataset(
+        hf_train_dataset, 
+        token_maps="token_maps.pkl",
+        tokenizer=text_tokenizer_name,
+        word_mask_prob=word_mask_prob,
+        phoneme_mask_prob=phoneme_mask_prob,
+        replace_prob=replace_prob,
+        max_mel_length=1024
+    )
 
-    phoneme_tokenizer = TextCleaner()
-    phoneme_vocab_size = phoneme_tokenizer.vocab_size
+    bpe_vocab_size = len(train_dataset.token_maps)
+    phoneme_vocab_size = train_dataset.text_cleaner.vocab_size
 
     if is_main_process:
         print("Phoneme vocab size:", phoneme_vocab_size)
         print("Pruned BPE vocab size:", bpe_vocab_size) 
-
-    if is_main_process:
-        print("Loading training dataset from", train_dataset_path)
-    hf_train_dataset = load_from_disk(train_dataset_path)
-    if is_main_process:
         print("Training dataset size:", len(hf_train_dataset))
-
-    train_dataset = FilePathDataset(
-        hf_train_dataset, 
-        phoneme_tokenizer, 
-        token_maps=token_maps, 
-        mlm_prob=mlm_prob, 
-        max_position_embeddings=1024
-    )
 
     # DistributedSampler akan membagi data ke semua GPU secara otomatis
     train_sampler = DistributedSampler(
@@ -116,7 +102,13 @@ def train():
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=4,
-        collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
+        collate_fn=lambda batch: collate_fn(
+            batch, 
+            train_dataset.text_cleaner, 
+            word_mask_prob=train_dataset.word_mask_prob,
+            phoneme_mask_prob=train_dataset.phoneme_mask_prob,
+            replace_prob=train_dataset.replace_prob
+        ),
         pin_memory=True
     )
 

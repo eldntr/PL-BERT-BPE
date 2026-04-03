@@ -1,43 +1,56 @@
 import torch
 from torch.utils.data import Dataset
 import random
+import pickle
+from text_utils import TextCleaner
 
 # TO DO:membatasi random token agar tidak memilih special token,
 
 class FilePathDataset(Dataset):
     def __init__(
         self,
-        dataset,                   
-        phoneme_tokenizer,      
-        token_maps=None,           
-        mlm_prob=0.15,            
-        mask_token_id=None,       
-        max_position_embeddings=1536,  
+        dataset,                        
+        token_maps="token_maps.pkl", 
+        tokenizer="GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct",
+        word_separator=220,
+        token_separator=" ",
+        token_mask="<mask>",
+        token_pad="<pad>",
+        max_mel_length=1536,
+        word_mask_prob=0.15,            
+        phoneme_mask_prob=0.8,
+        replace_prob=0.5,
     ):
-        self.dataset = dataset
-        self.phoneme_tokenizer = phoneme_tokenizer
-        self.token_maps = token_maps
-        self.mlm_prob = mlm_prob
-        self.mask_token_id = mask_token_id or phoneme_tokenizer.mask_id
-        self.pad_id = phoneme_tokenizer.pad_id
-        self.max_position_embeddings = max_position_embeddings
+        self.data = dataset
+        self.max_mel_length = max_mel_length
+        self.word_mask_prob = word_mask_prob
+        self.phoneme_mask_prob = phoneme_mask_prob
+        self.replace_prob = replace_prob
+        self.text_cleaner = TextCleaner()
+
+        self.word_separator = word_separator
+        self.token_separator = token_separator
+        self.token_mask = self.text_cleaner(token_mask)[0]
+        self.pad_id = self.text_cleaner(token_pad)[0]
+
+        with open(token_maps, 'rb') as handle:
+            self.token_maps = pickle.load(handle)  
+        
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        ex = self.dataset[idx]
+        ex = self.data[idx]
 
         phoneme_words = ex["phonemes"]       
         bpe_words     = ex["bpe_ids"]        
 
-        # Calculate phoneme IDs and lengths for each word
-        phon_ids_per_word = [self.phoneme_tokenizer.encode(p) for p in phoneme_words]
+        phon_ids_per_word = [self.text_cleaner(p) for p in phoneme_words]
         word_lens = [len(p_ids) for p_ids in phon_ids_per_word]
         total_len = sum(word_lens)
 
-        if total_len > self.max_position_embeddings:
-            # Random truncate: pick a contiguous window of words that fits
+        if total_len > self.max_mel_length:
             num_words = len(phoneme_words)
             i = random.randint(0, num_words - 1)
             
@@ -45,29 +58,22 @@ class FilePathDataset(Dataset):
             start_idx = i
             end_idx = i
             
-            # Forward expand
             for k in range(i, num_words):
-                if curr_len + word_lens[k] <= self.max_position_embeddings:
+                if curr_len + word_lens[k] <= self.max_mel_length:
                     curr_len += word_lens[k]
                     end_idx = k + 1
                 else:
                     break
             
-            # Backward expand if there's room left
             for k in range(start_idx - 1, -1, -1):
-                if curr_len + word_lens[k] <= self.max_position_embeddings:
+                if curr_len + word_lens[k] <= self.max_mel_length:
                     curr_len += word_lens[k]
                     start_idx = k
                 else:
                     break
             
-            # Final window: [start_idx, end_idx)
-            # Note: in the extreme case where a single word is longer than max_position_embeddings,
-            # end_idx might be start_idx or start_idx + 1 if we allow at least one word.
-            # Here we ensure at least one word is taken if it's the start word.
             if start_idx == end_idx and num_words > 0:
                 end_idx = start_idx + 1
-                # We'll truncate this single word later if needed
             
             phon_ids_per_word = phon_ids_per_word[start_idx:end_idx]
             bpe_words = bpe_words[start_idx:end_idx]
@@ -77,9 +83,8 @@ class FilePathDataset(Dataset):
         curr = 0
 
         for phon_ids in phon_ids_per_word:
-            # Truncate if a single word is still too long (rare)
-            if curr + len(phon_ids) > self.max_position_embeddings:
-                phon_ids = phon_ids[:self.max_position_embeddings - curr]
+            if curr + len(phon_ids) > self.max_mel_length:
+                phon_ids = phon_ids[:self.max_mel_length - curr]
             
             if not phon_ids:
                 break
@@ -93,10 +98,7 @@ class FilePathDataset(Dataset):
         flat_bpe = []
         for ids in bpe_words:
             if self.token_maps is not None:
-                # User's requested format: token_maps[w]['token']
-                # This assumes all IDs in bpe_words were included in the pruned vocab.
                 ids = [self.token_maps[i]['token'] for i in ids]
-            
             flat_bpe.extend(ids)
 
         return {
@@ -106,10 +108,10 @@ class FilePathDataset(Dataset):
         }
 
 
-def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
+def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, replace_prob=0.5):
 
-    pad_id = phoneme_tokenizer.pad_id
-    mask_id = phoneme_tokenizer.mask_id
+    pad_id = text_cleaner.pad_id
+    mask_id = text_cleaner.mask_id
 
     phon_seqs = [ex["phoneme_ids"] for ex in batch]   
     spans     = [ex["word_spans"]   for ex in batch]
@@ -122,33 +124,27 @@ def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
     mlm_labels = torch.full((B, max_T), -100, dtype=torch.long)
     att_mask   = torch.zeros((B, max_T), dtype=torch.long)
 
-    # Whole word masking
     for i in range(B):
         seq = phon_seqs[i]
         L = len(seq)
         input_phon[i, :L] = torch.tensor(seq)
         att_mask[i, :L] = 1
 
-        # pilih kata untuk masking
         word_spans = spans[i]
         num_words = len(word_spans)
 
-        # ambil 15% kata
-        num_mask = max(1, int(num_words * mlm_prob))
+        num_mask = max(1, int(num_words * word_mask_prob))
         chosen = random.sample(range(num_words), num_mask)
 
-        # lakukan masking per kata
         for widx in chosen:
             start, end = word_spans[widx]
-
-            # 80% mask
-            if random.random() < 0.8:
+            
+            if random.random() < phoneme_mask_prob:
                 input_phon[i, start:end] = mask_id
-            # 10% random phoneme
-            elif random.random() < 0.5:
-                random_ids = torch.randint(0, phoneme_tokenizer.vocab_size, (end-start,))
+            
+            elif random.random() < replace_prob:
+                random_ids = torch.randint(0, text_cleaner.vocab_size, (end-start,))
                 input_phon[i, start:end] = random_ids
-            # 10% keep original → nothing to do
 
             mlm_labels[i, start:end] = torch.tensor(seq[start:end])
 
@@ -162,10 +158,8 @@ def collate_fn(batch, phoneme_tokenizer, mlm_prob=0.15):
     concat_bpe = torch.tensor(concat_bpe, dtype=torch.long)
     target_lengths = torch.tensor(target_lengths, dtype=torch.long)
 
-    # input lengths untuk CTC (phoneme length sebelum padding)
     input_lengths = torch.tensor([len(seq) for seq in phon_seqs], dtype=torch.long)
 
-    # final dictionary
     return {
         "phoneme_input": input_phon,        # [B, T]
         "mlm_labels": mlm_labels,           # [B, T]
