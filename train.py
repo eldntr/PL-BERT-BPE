@@ -19,6 +19,8 @@ from text_utils import TextCleaner
 from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
 
+import yaml
+
 def setup_ddp():
     """Initialize DDP environment"""
     dist.init_process_group(backend="nccl")
@@ -34,29 +36,32 @@ def train():
     local_rank = setup_ddp()
     world_size = dist.get_world_size()
     is_main_process = (local_rank == 0)
+
+    # Load configuration
+    config_path = "Configs/config.yml"
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
     
     if is_main_process:
         print(f"🚀 Training with {world_size} GPUs (DDP)")
   
-    dataset_path = "wikipedia-50"
+    dataset_path = config["data_folder"]
     train_dataset_path = f"{dataset_path}/train"
-    text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
+    
+    dataset_params = config["dataset_params"]
+    model_params = config["model_params"]
 
     # Batch size per GPU - total effective batch = batch_size * grad_accum_steps * world_size
-    batch_size = 1                
-    grad_accum_steps = 64         
-    max_steps = 1_000_000        
-    save_every = 50_000        
+    batch_size = config["batch_size"]
+    grad_accum_steps = config.get("grad_accum_steps", 64)         
+    max_steps = config["num_steps"]
+    save_every = config["save_interval"]
+    log_every = config["log_interval"]
 
-    lr_max = 5e-4                 
-    warmup_steps = 10_000         
+    lr_max = config.get("learning_rate", 5e-4)
+    warmup_steps = config.get("warmup_steps", 10000)
     
-    word_mask_prob = 0.15
-    phoneme_mask_prob = 0.8
-    replace_prob = 0.5
-
-    lambda_ctc = 1.0
-    log_every = 100
+    lambda_ctc = config.get("lambda_ctc", 1.0)
 
     device = torch.device(f"cuda:{local_rank}")
     
@@ -72,12 +77,16 @@ def train():
     
     train_dataset = FilePathDataset(
         hf_train_dataset, 
-        token_maps="token_maps.pkl",
-        tokenizer=text_tokenizer_name,
-        word_mask_prob=word_mask_prob,
-        phoneme_mask_prob=phoneme_mask_prob,
-        replace_prob=replace_prob,
-        max_mel_length=1024
+        token_maps=dataset_params["token_maps"],
+        tokenizer=dataset_params["tokenizer"],
+        word_separator=dataset_params["word_separator"],
+        token_separator=dataset_params["token_separator"],
+        token_mask=dataset_params["token_mask"],
+        token_pad=dataset_params["token_pad"],
+        max_mel_length=dataset_params["max_mel_length"],
+        word_mask_prob=dataset_params["word_mask_prob"],
+        phoneme_mask_prob=dataset_params["phoneme_mask_prob"],
+        replace_prob=dataset_params["replace_prob"]
     )
 
     bpe_vocab_size = len(train_dataset.token_maps)
@@ -115,11 +124,11 @@ def train():
     model = MultiTaskModel(
         phoneme_vocab_size=phoneme_vocab_size,
         bpe_vocab_size=bpe_vocab_size,
-        hidden_size=512,
-        num_layers=6,
-        num_heads=8,
-        intermediate_size=2048,
-        max_position_embeddings=1024,  # Increased for BOS/EOS/space tokens
+        hidden_size=model_params["hidden_size"],
+        num_layers=model_params["num_hidden_layers"],
+        num_heads=model_params["num_attention_heads"],
+        intermediate_size=model_params["intermediate_size"],
+        max_position_embeddings=model_params["max_position_embeddings"],
     ).to(device)
 
     model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)

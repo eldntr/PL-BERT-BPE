@@ -1,6 +1,7 @@
 import os
 import json
 import glob
+import yaml
 from datasets import load_dataset, load_from_disk, concatenate_datasets
 
 from transformers import AutoTokenizer
@@ -8,7 +9,12 @@ from text_utils import TextCleaner
 from phonemize import phonemize
 from build_pruned_vocab import build_pruned_vocab
 
-tokenizer = AutoTokenizer.from_pretrained("GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
+# Load configuration
+config_path = "Configs/config.yml"
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
+
+tokenizer = AutoTokenizer.from_pretrained(config["dataset_params"]["tokenizer"])
 
 phoneme_tokenizer = TextCleaner()
 
@@ -76,7 +82,7 @@ dataset = dataset.filter(lambda ex: len(ex["words"]) > 0)
 
 # Symbols are fixed in text_utils.TextCleaner, so no need to build vocabulary or save it.
 
-dataset_output_dir = "wikipedia-50"
+dataset_output_dir = config["data_folder"]
 dataset.save_to_disk(dataset_output_dir)
 print(f"Saved dataset to {dataset_output_dir}")
 
