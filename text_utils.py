@@ -38,7 +38,7 @@ class TextCleaner:
         self.vocab_size = len(dicts)
 
 
-    def encode(self, text):
+    def __call__(self, text):
         if not text:
             return []
         
@@ -46,7 +46,7 @@ class TextCleaner:
         if isinstance(text, list):
             ids = []
             for t in text:
-                ids.extend(self.encode(t))
+                ids.extend(self(t))
             return ids
 
         # Direct match for special tokens or single characters
@@ -58,7 +58,7 @@ class TextCleaner:
             units = text.split()
             ids = []
             for u in units:
-                ids.extend(self.encode(u))
+                ids.extend(self(u))
             return ids
         
         # Character fallback
@@ -69,6 +69,4 @@ class TextCleaner:
             else:
                 indexes.append(self.unk_id)
         return indexes
-
-    def __call__(self, text):
-        return self.encode(text)
+        
