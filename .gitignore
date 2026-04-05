@@ -2,3 +2,5 @@ wiki*
 __pycache__/
 .venv/
 logs
+*.t7
+*.pkl

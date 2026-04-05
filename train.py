@@ -150,6 +150,27 @@ def train():
     ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
 
     global_step = 0
+    import glob
+    checkpoints = glob.glob("checkpoint_step_*.t7")
+    if len(checkpoints) > 0:
+        def get_step(ckpt):
+            try:
+                step_str = ckpt.split("checkpoint_step_")[-1].replace("_final.t7", "").replace(".t7", "")
+                return int(step_str)
+            except ValueError:
+                return -1
+                
+        latest_ckpt = max(checkpoints, key=get_step)
+        if get_step(latest_ckpt) != -1:
+            if is_main_process:
+                print(f"Loading checkpoint from {latest_ckpt}...")
+            checkpoint = torch.load(latest_ckpt, map_location=device)
+            model.module.load_state_dict(checkpoint["model_state"])
+            optimizer.load_state_dict(checkpoint["optimizer_state"])
+            global_step = checkpoint["global_step"]
+            if is_main_process:
+                print(f"Resumed at step {global_step}")
+
     model.train()
 
     while global_step < max_steps:
@@ -221,7 +242,7 @@ def train():
                 )
 
             if is_main_process and global_step % save_every == 0:
-                ckpt_path = f"checkpoint_step_{global_step}.pt"
+                ckpt_path = f"checkpoint_step_{global_step}.t7"
                 torch.save({
                     "model_state": model.module.state_dict(),  
                     "optimizer_state": optimizer.state_dict(),
@@ -230,7 +251,7 @@ def train():
                 print(f"✓ Saved checkpoint to {ckpt_path}")
 
     if is_main_process:
-        final_ckpt_path = f"checkpoint_step_{global_step}_final.pt"
+        final_ckpt_path = f"checkpoint_step_{global_step}_final.t7"
         torch.save({
             "model_state": model.module.state_dict(),  
             "optimizer_state": optimizer.state_dict(),
