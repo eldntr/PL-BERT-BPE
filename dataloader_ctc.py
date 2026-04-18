@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import random
 import pickle
-from text_utils import TextCleaner
+from text_utils import TextCleaner, _special
 
 # TO DO:membatasi random token agar tidak memilih special token,
 
@@ -16,7 +16,7 @@ class FilePathDataset(Dataset):
         token_separator=" ",
         token_mask="<mask>",
         token_pad="<pad>",
-        max_mel_length=1536,
+        max_mel_length=512,
         word_mask_prob=0.15,            
         phoneme_mask_prob=0.8,
         replace_prob=0.5,
@@ -30,8 +30,8 @@ class FilePathDataset(Dataset):
 
         self.word_separator = word_separator
         self.token_separator = token_separator
-        self.token_mask = self.text_cleaner(token_mask)[0]
-        self.pad_id = self.text_cleaner(token_pad)[0]
+        self.token_mask = self.text_cleaner.word_index_dictionary.get(token_mask, self.text_cleaner.word_index_dictionary.get('<mask>', 4))
+        self.pad_id = self.text_cleaner.word_index_dictionary.get(token_pad, self.text_cleaner.word_index_dictionary.get('<pad>', 0))
 
         with open(token_maps, 'rb') as handle:
             self.token_maps = pickle.load(handle)  
@@ -110,8 +110,9 @@ class FilePathDataset(Dataset):
 
 def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, replace_prob=0.5):
 
-    pad_id = text_cleaner.pad_id
-    mask_id = text_cleaner.mask_id
+    pad_id = text_cleaner.word_index_dictionary.get('<pad>', 0)
+    mask_id = text_cleaner.word_index_dictionary.get('<mask>', 4)
+    vocab_size = len(text_cleaner.word_index_dictionary)
 
     phon_seqs = [ex["phoneme_ids"] for ex in batch]   
     spans     = [ex["word_spans"]   for ex in batch]
@@ -143,7 +144,7 @@ def collate_fn(batch, text_cleaner, word_mask_prob=0.15, phoneme_mask_prob=0.8, 
                 input_phon[i, start:end] = mask_id
             
             elif random.random() < replace_prob:
-                random_ids = torch.randint(0, text_cleaner.vocab_size, (end-start,))
+                random_ids = torch.randint(len(_special), vocab_size, (end-start,))
                 input_phon[i, start:end] = random_ids
 
             mlm_labels[i, start:end] = torch.tensor(seq[start:end])

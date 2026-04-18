@@ -1,65 +1,33 @@
 # IPA Phonemizer: https://github.com/bootphon/phonemizer
 
-import os
-import string
-
+_special = ['<pad>', '<sos>', '<eos>', '<unk>', '<mask>']
 _punctuation = ';:,.!?¡¿—…"«»“” '
 _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-_letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʃʂʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘ᵻ̩̃"
-
-# Special tokens for training pipeline
-_special = ['[PAD]', '<mask>', '[UNK]']
+_letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ"
 
 # Export all symbols:
 symbols = _special + list(_punctuation) + list(_letters) + list(_letters_ipa)
 
-# Remove duplicates while preserving order
+# Filter unique symbols
 symbols = list(dict.fromkeys(symbols))
 
-dicts = {s: i for i, s in enumerate(symbols)}
+dicts = {}
+for i in range(len((symbols))):
+    dicts[symbols[i]] = i
 
 class TextCleaner:
     def __init__(self, dummy=None):
         self.word_index_dictionary = dicts
-        self.pad_id = dicts['[PAD]']
-        self.mask_id = dicts['<mask>']
-        self.unk_id = dicts['[UNK]']
-        self.space_token = ' '
-        self.vocab_size = len(dicts)
-
-
+        print("Final Vocab Size:", len(dicts))
+        
     def __call__(self, text):
-        if not text:
-            return []
-        
-        # Support list of strings
-        if isinstance(text, list):
-            ids = []
-            for t in text:
-                ids.extend(self(t))
-            return ids
-
-        # Direct match for special tokens or single characters
-        if text in self.word_index_dictionary:
-            return [self.word_index_dictionary[text]]
-        
-        # Handle space-separated phonemes (common in espeak output)
-        if " " in text:
-            units = text.split()
-            ids = []
-            for u in units:
-                ids.extend(self(u))
-            return ids
-        
-        # Character fallback
         indexes = []
         for char in text:
-            if char in self.word_index_dictionary:
+            try:
                 indexes.append(self.word_index_dictionary[char])
-            else:
-                indexes.append(self.unk_id)
+            except KeyError:
+                indexes.append(self.word_index_dictionary['<unk>'])
         return indexes
-        
+
 if __name__ == "__main__":
-    text_cleaner = TextCleaner()
-    print(text_cleaner.vocab_size)
+    print(TextCleaner())

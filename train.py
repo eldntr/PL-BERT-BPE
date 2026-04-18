@@ -65,6 +65,10 @@ def train():
 
     device = torch.device(f"cuda:{local_rank}")
     
+    mixed_precision = config.get("mixed_precision", "fp32")
+    use_fp16 = (mixed_precision == "fp16")
+    scaler = torch.amp.GradScaler('cuda', enabled=use_fp16)
+    
     if is_main_process:
         print(f"Per-GPU batch size: {batch_size}")
         print(f"Gradient accumulation steps: {grad_accum_steps}")
@@ -90,7 +94,7 @@ def train():
     )
 
     bpe_vocab_size = len(train_dataset.token_maps)
-    phoneme_vocab_size = train_dataset.text_cleaner.vocab_size
+    phoneme_vocab_size = len(train_dataset.text_cleaner.word_index_dictionary)
 
     if is_main_process:
         print("Phoneme vocab size:", phoneme_vocab_size)
@@ -167,6 +171,8 @@ def train():
             checkpoint = torch.load(latest_ckpt, map_location=device)
             model.module.load_state_dict(checkpoint["model_state"])
             optimizer.load_state_dict(checkpoint["optimizer_state"])
+            if use_fp16 and "scaler_state" in checkpoint and checkpoint["scaler_state"] is not None:
+                scaler.load_state_dict(checkpoint["scaler_state"])
             global_step = checkpoint["global_step"]
             if is_main_process:
                 print(f"Resumed at step {global_step}")
@@ -195,34 +201,42 @@ def train():
             if global_step % grad_accum_steps == 1:
                 optimizer.zero_grad()
 
-            mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
+            with torch.amp.autocast('cuda', enabled=use_fp16):
+                mlm_logits, ctc_logits = model(phoneme_input, attention_mask=attention_mask)
+    
+                B, T, Vp = mlm_logits.shape
+                mlm_loss = F.cross_entropy(
+                    mlm_logits.view(B*T, Vp),
+                    mlm_labels.view(B*T),
+                    ignore_index=-100
+                )
+                
+                ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
+    
+                # Shift BPE ids by +1 (0 = blank)
+                ctc_targets_shifted = ctc_targets + 1
+    
+                ctc_loss = ctc_loss_fn(
+                    ctc_log_probs,
+                    ctc_targets_shifted,
+                    input_lengths,
+                    target_lengths
+                )
+    
+                loss = mlm_loss + lambda_ctc * ctc_loss
+    
+                loss_normalized = loss / grad_accum_steps
 
-            B, T, Vp = mlm_logits.shape
-            mlm_loss = F.cross_entropy(
-                mlm_logits.view(B*T, Vp),
-                mlm_labels.view(B*T),
-                ignore_index=-100
-            )
-            
-            ctc_log_probs = F.log_softmax(ctc_logits, dim=-1).transpose(0, 1)  # [T, B, C]
-
-            # Shift BPE ids by +1 (0 = blank)
-            ctc_targets_shifted = ctc_targets + 1
-
-            ctc_loss = ctc_loss_fn(
-                ctc_log_probs,
-                ctc_targets_shifted,
-                input_lengths,
-                target_lengths
-            )
-
-            loss = mlm_loss + lambda_ctc * ctc_loss
-
-            loss_normalized = loss / grad_accum_steps
-            loss_normalized.backward()
+            if use_fp16:
+                scaler.scale(loss_normalized).backward()
+            else:
+                loss_normalized.backward()
 
             # Update weights hanya setiap grad_accum_steps
             if global_step % grad_accum_steps == 0:
+                if use_fp16:
+                    scaler.unscale_(optimizer)
+                    
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 
                 # Manual LR update untuk warmup + cosine decay
@@ -230,7 +244,12 @@ def train():
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = lr_max * lr_scale
                 
-                optimizer.step()
+                if use_fp16:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                    
                 optimizer.zero_grad()
                 scheduler.step()  
 
@@ -246,6 +265,7 @@ def train():
                 torch.save({
                     "model_state": model.module.state_dict(),  
                     "optimizer_state": optimizer.state_dict(),
+                    "scaler_state": scaler.state_dict() if use_fp16 else None,
                     "global_step": global_step,
                 }, ckpt_path)
                 print(f"✓ Saved checkpoint to {ckpt_path}")
@@ -254,8 +274,9 @@ def train():
         final_ckpt_path = f"checkpoint_step_{global_step}_final.t7"
         torch.save({
             "model_state": model.module.state_dict(),  
-            "optimizer_state": optimizer.state_dict(),
-            "global_step": global_step,
+            # "optimizer_state": optimizer.state_dict(),
+            # "scaler_state": scaler.state_dict() if use_fp16 else None,
+            # "global_step": global_step,
         }, final_ckpt_path)
         print(f"✓ Training complete! Final checkpoint saved to {final_ckpt_path}")
 
