@@ -6,10 +6,10 @@ import torch.nn.functional as F
 from datasets import load_from_disk
 from torch.utils.data import DataLoader
 
-from text_tokenizer import TextTokenizer
-from phoneme_tokenizer import PhonemeTokenizer
+from text_utils import TextCleaner
 from dataloader_ctc import FilePathDataset, collate_fn
 from model import MultiTaskModel
+import yaml
 
 def compute_mlm_accuracy(logits, labels):
     """Compute MLM accuracy (ignoring -100 labels)"""
@@ -111,8 +111,6 @@ def evaluate(
     model,
     test_loader,
     device,
-    phoneme_tokenizer,
-    mlm_prob=0.15,
     checkpoint_path=None
 ):
     """Evaluate model on test set with all metrics"""
@@ -194,15 +192,20 @@ def evaluate(
 
 
 def main():
-    dataset_path = "wikipedia-50"
+    # Load configuration
+    config_path = "Configs/config.yml"
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+        
+    dataset_path = config["data_folder"]
     test_dataset_path = f"{dataset_path}/test"
-    phoneme_vocab_path = f"{dataset_path}/phoneme_vocab.json"
-    text_tokenizer_name = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
+    dataset_params = config["dataset_params"]
+    model_params = config["model_params"]
 
-    checkpoint_path = "checkpoint_step_1000000_final.pt" 
+    # Try to find the latest .t7 checkpoint if hardcoded one is not found
+    checkpoint_path = "checkpoint_step_1000000_final.t7" 
     
-    batch_size = 1
-    mlm_prob = 0.15
+    batch_size = config.get("batch_size", 1)  # Or smaller for eval
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
@@ -211,28 +214,31 @@ def main():
     print(f"Device: {device}")
     print()
    
-    print("Loading tokenizers...")
-    text_tokenizer = TextTokenizer(text_tokenizer_name, map_file=f"{dataset_path}/bpe_vocab_map.json")
-    bpe_vocab_size = len(text_tokenizer)
-    
-    phoneme_tokenizer = PhonemeTokenizer.load(phoneme_vocab_path)
-    phoneme_vocab_size = phoneme_tokenizer.vocab_size
-    
-    print(f"Phoneme vocab size: {phoneme_vocab_size}")
-    print(f"BPE vocab size: {bpe_vocab_size}")
-    print()
-
     print(f"Loading test dataset from {test_dataset_path}...")
     hf_test_dataset = load_from_disk(test_dataset_path)
     print(f"Test dataset size: {len(hf_test_dataset)}")
     
     test_dataset = FilePathDataset(
-        hf_test_dataset,
-        phoneme_tokenizer,
-        text_tokenizer,
-        mlm_prob=mlm_prob,
-        max_position_embeddings=1024
+        hf_test_dataset, 
+        token_maps=dataset_params["token_maps"],
+        tokenizer=dataset_params["tokenizer"],
+        word_separator=dataset_params["word_separator"],
+        token_separator=dataset_params["token_separator"],
+        token_mask=dataset_params["token_mask"],
+        token_pad=dataset_params["token_pad"],
+        max_mel_length=dataset_params["max_mel_length"],
+        word_mask_prob=dataset_params["word_mask_prob"],
+        phoneme_mask_prob=dataset_params["phoneme_mask_prob"],
+        replace_prob=dataset_params["replace_prob"]
     )
+    
+    bpe_vocab_size = len(test_dataset.token_maps)
+    phoneme_vocab_size = test_dataset.text_cleaner.vocab_size
+    
+    print(f"Phoneme vocab size: {phoneme_vocab_size}")
+    print(f"BPE vocab size: {bpe_vocab_size}")
+    print()
+
     print(f"Test dataset after filtering: {len(test_dataset)}")
     print()
     
@@ -240,7 +246,13 @@ def main():
         test_dataset,
         batch_size=batch_size,
         num_workers=4,
-        collate_fn=lambda batch: collate_fn(batch, phoneme_tokenizer, mlm_prob=mlm_prob),
+        collate_fn=lambda batch: collate_fn(
+            batch, 
+            test_dataset.text_cleaner, 
+            word_mask_prob=test_dataset.word_mask_prob,
+            phoneme_mask_prob=test_dataset.phoneme_mask_prob,
+            replace_prob=test_dataset.replace_prob
+        ),
         pin_memory=True
     )
   
@@ -248,21 +260,29 @@ def main():
     model = MultiTaskModel(
         phoneme_vocab_size=phoneme_vocab_size,
         bpe_vocab_size=bpe_vocab_size,
-        hidden_size=512,
-        num_layers=6,
-        num_heads=8,
-        intermediate_size=2048,
-        max_position_embeddings=1024,
+        hidden_size=model_params["hidden_size"],
+        num_layers=model_params["num_hidden_layers"],
+        num_heads=model_params["num_attention_heads"],
+        intermediate_size=model_params["intermediate_size"],
+        max_position_embeddings=model_params["max_position_embeddings"],
     ).to(device)
 
     if not os.path.exists(checkpoint_path):
-        print(f"❌ Checkpoint not found: {checkpoint_path}")
-        print(f"Available checkpoints:")
         import glob
-        checkpoints = glob.glob("checkpoint_*.pt")
-        for ckpt in sorted(checkpoints):
-            print(f"  - {ckpt}")
-        return
+        checkpoints = glob.glob("checkpoint_step_*.t7")
+        if not checkpoints:
+            print(f"❌ Checkpoint not found: {checkpoint_path}")
+            return
+        
+        def get_step(ckpt):
+            try:
+                step_str = ckpt.split("checkpoint_step_")[-1].replace("_final.t7", "").replace(".t7", "")
+                return int(step_str)
+            except ValueError:
+                return -1
+                
+        checkpoint_path = max(checkpoints, key=get_step)
+        print(f"⚠️ Hardcoded checkpoint not found. Using latest: {checkpoint_path}")
     
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state"])
@@ -278,8 +298,6 @@ def main():
         model,
         test_loader,
         device,
-        phoneme_tokenizer,
-        mlm_prob=mlm_prob,
         checkpoint_path=checkpoint_path
     )
     

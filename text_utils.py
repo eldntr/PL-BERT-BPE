@@ -7,21 +7,11 @@ _punctuation = ';:,.!?¡¿—…"«»“” '
 _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 _letters_ipa = "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʃʂʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘ᵻ̩̃"
 
-_extra_punctuation = '-/()\"\'%&{}[]=+_*'
-_punctuation += _extra_punctuation
-
-# Multi-character symbols (diphthongs, affricates, R-colored vowels, etc.)
-_multi_symbols = [
-    'dʒ', 'tʃ', 'aɪ', 'eɪ', 'oʊ', 'aʊ', 'ɔɪ', 'iə',
-    'ɪr', 'ɛr', 'ʊr', 'ɔːr', 'ɜːr', 'ɑːr',
-    'n̩', 'ɑ̃', 'ɔ̃'
-]
-
 # Special tokens for training pipeline
 _special = ['[PAD]', '<mask>', '[UNK]']
 
 # Export all symbols:
-symbols = _special + _multi_symbols + list(_punctuation) + list(_letters) + list(_letters_ipa)
+symbols = _special + list(_punctuation) + list(_letters) + list(_letters_ipa)
 
 # Remove duplicates while preserving order
 symbols = list(dict.fromkeys(symbols))
@@ -70,3 +60,6 @@ class TextCleaner:
                 indexes.append(self.unk_id)
         return indexes
         
+if __name__ == "__main__":
+    text_cleaner = TextCleaner()
+    print(text_cleaner.vocab_size)
