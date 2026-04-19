@@ -23,7 +23,9 @@ def build_pruned_vocab(dataset_path="wiki_phoneme_final_v2"):
 
     special_ids = {
         tokenizer.pad_token_id, 
-        tokenizer.unk_token_id
+        tokenizer.unk_token_id,
+        tokenizer.bos_token_id,
+        tokenizer.eos_token_id
     }
 
     special_ids = {sid for sid in special_ids if sid is not None}

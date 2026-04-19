@@ -33,6 +33,18 @@ class FilePathDataset(Dataset):
         self.token_mask = self.text_cleaner.word_index_dictionary.get(token_mask, self.text_cleaner.word_index_dictionary.get('<mask>', 4))
         self.pad_id = self.text_cleaner.word_index_dictionary.get(token_pad, self.text_cleaner.word_index_dictionary.get('<pad>', 0))
 
+        from transformers import AutoTokenizer
+        if tokenizer is not None and isinstance(tokenizer, str):
+            _tok = AutoTokenizer.from_pretrained(tokenizer)
+            self.bos_bpe = _tok.bos_token_id if _tok.bos_token_id is not None else 128000
+            self.eos_bpe = _tok.eos_token_id if _tok.eos_token_id is not None else 128001
+        else:
+            self.bos_bpe = 128000
+            self.eos_bpe = 128001
+
+        self.sos_phon = self.text_cleaner.word_index_dictionary.get('<sos>', 1)
+        self.eos_phon = self.text_cleaner.word_index_dictionary.get('<eos>', 2)
+
         with open(token_maps, 'rb') as handle:
             self.token_maps = pickle.load(handle)  
         
@@ -78,13 +90,13 @@ class FilePathDataset(Dataset):
             phon_ids_per_word = phon_ids_per_word[start_idx:end_idx]
             bpe_words = bpe_words[start_idx:end_idx]
 
-        flat_phon = []
+        flat_phon = [self.sos_phon]
         word_spans = []   # (start, end) indexes
-        curr = 0
+        curr = 1
 
         for phon_ids in phon_ids_per_word:
-            if curr + len(phon_ids) > self.max_mel_length:
-                phon_ids = phon_ids[:self.max_mel_length - curr]
+            if curr + len(phon_ids) > self.max_mel_length - 1:
+                phon_ids = phon_ids[:self.max_mel_length - 1 - curr]
             
             if not phon_ids:
                 break
@@ -94,12 +106,22 @@ class FilePathDataset(Dataset):
             curr += len(phon_ids)
             end = curr
             word_spans.append((start, end))
+            
+        flat_phon.append(self.eos_phon)
 
-        flat_bpe = []
+        if self.token_maps is not None:
+            compact_bos = self.token_maps.get(self.bos_bpe, {}).get('token', self.bos_bpe)
+            compact_eos = self.token_maps.get(self.eos_bpe, {}).get('token', self.eos_bpe)
+        else:
+            compact_bos = self.bos_bpe
+            compact_eos = self.eos_bpe
+
+        flat_bpe = [compact_bos]
         for ids in bpe_words:
             if self.token_maps is not None:
-                ids = [self.token_maps[i]['token'] for i in ids]
+                ids = [self.token_maps.get(i, {}).get('token', i) for i in ids]
             flat_bpe.extend(ids)
+        flat_bpe.append(compact_eos)
 
         return {
             "phoneme_ids": flat_phon,

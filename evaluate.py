@@ -233,7 +233,7 @@ def main():
     )
     
     bpe_vocab_size = len(test_dataset.token_maps)
-    phoneme_vocab_size = test_dataset.text_cleaner.vocab_size
+    phoneme_vocab_size = len(test_dataset.text_cleaner.word_index_dictionary)
     
     print(f"Phoneme vocab size: {phoneme_vocab_size}")
     print(f"BPE vocab size: {bpe_vocab_size}")
