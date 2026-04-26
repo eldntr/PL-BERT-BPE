@@ -1,0 +1,198 @@
+PL-BERT-BPE Inference Results
+================================================================================
+
+Example 1:
+Input: Presiden Joko Widodo meresmikan jembatan baru di Papua kemarin siang.
+Output: Presiden Joko Widodo meresmikan Jembatan baru di Papua Kemarin Siang.
+----------------------------------------
+Detailed Log:
+input:   Presiden Joko Widodo meresmikan jembatan baru di Papua kemarin siang.
+normalized: Presiden Joko Widodo meresmikan jembatan baru di Papua kemarin siang.
+phonemes:   ['pɹˈɛzɪdən', ' ', 'dʒˈoko', ' ', 'widˈodo', ' ', 'mərəsmˈikan', ' ', 'dʒəmbˈatan', ' ', 'bˈaru', ' ', 'di', ' ', 'papˈua', ' ', 'kəmˈarin', ' ', 'sˈiaŋ', '.']
+input ids:  [1, 62, 127, 160, 90, 72, 106, 50, 87, 60, 20, 50, 151, 160, 61, 57, 61, 20, 69, 55, 50, 160, 61, 50, 61, 20, 59, 87, 64, 87, 65, 59, 160, 55, 57, 47, 60, 20, 50, 151, 87, 59, 48, 160, 47, 66, 47, 60, 20, 48, 160, 47, 64, 67, 20, 50, 55, 20, 62, 47, 62, 160, 67, 47, 20, 57, 87, 59, 160, 47, 64, 55, 60, 20, 65, 160, 55, 47, 116, 8, 2]
+CTC compact IDs: [128000, 14704, 12770, 220, 41, 28342, 220, 54, 307, 6132, 220, 1195, 288, 76, 23014, 220, 41, 9034, 16623, 220]...
+
+================================================================================
+
+Example 2:
+Input: Batik merupakan warisan budaya Indonesia yang sudah mendunia dan diakui UNESCO.
+Output: Batik merupakan warisan budaya Indonesia yang sudah mendunia dan diakui UNESCO.
+----------------------------------------
+Detailed Log:
+input:   Batik merupakan warisan budaya Indonesia yang sudah mendunia dan diakui UNESCO.
+normalized: Batik merupakan warisan budaya Indonesia yang sudah mendunia dan diakui UNESCO.
+phonemes:   ['bˈatik', ' ', 'mərupˈakan', ' ', 'warˈisan', ' ', 'budˈaja', ' ', 'ˌindonəsˈia', ' ', 'jaŋ', ' ', 'sˈudah', ' ', 'məndunˈia', ' ', 'dan', ' ', 'dˌiakˈui', ' ', 'ʌnˈɛskoʊ', '.']
+input ids:  [1, 48, 160, 47, 66, 55, 57, 20, 59, 87, 64, 67, 62, 160, 47, 57, 47, 60, 20, 69, 47, 64, 160, 55, 65, 47, 60, 20, 48, 67, 50, 160, 47, 56, 47, 20, 161, 55, 60, 50, 61, 60, 87, 65, 160, 55, 47, 20, 56, 47, 116, 20, 65, 160, 67, 50, 47, 54, 20, 59, 87, 60, 50, 67, 60, 160, 55, 47, 20, 50, 47, 60, 20, 50, 161, 55, 47, 57, 160, 67, 55, 20, 142, 60, 160, 90, 65, 57, 61, 139, 8, 2]
+CTC compact IDs: [128000, 59500, 1609, 220, 1195, 74836, 220, 11710, 17570, 220, 71027, 12874, 220, 1451, 57772, 220, 41345, 220, 82, 664]...
+
+================================================================================
+
+Example 3:
+Input: Nasi goreng adalah makanan favorit banyak orang, baik lokal maupun turis mancanegara.
+Output: Nasi goreng adalah makanan favorit banyak orang, baik lokal maupun turis mancanegara.
+----------------------------------------
+Detailed Log:
+input:   Nasi goreng adalah makanan favorit banyak orang, baik lokal maupun turis mancanegara.
+normalized: Nasi goreng adalah makanan favorit banyak orang, baik lokal maupun turis mancanegara.
+phonemes:   ['nˈasi', ' ', 'ɡˈɔrəŋ', ' ', 'adˌalah', ' ', 'makˈanan', ' ', 'fˈeɪvɚɹᵻt', ' ', 'bˈaɲak', ' ', 'ˈɔraŋ', ',', ' ', 'bˈaɪk', ' ', 'lˈokal', ' ', 'mˈaʊpun', ' ', 'tˈuris', ' ', 'mˌantʃanəɡˈara', '.']
+input ids:  [1, 60, 160, 47, 65, 55, 20, 96, 160, 80, 64, 87, 116, 20, 47, 50, 161, 47, 58, 47, 54, 20, 59, 47, 57, 160, 47, 60, 47, 60, 20, 52, 160, 51, 106, 68, 89, 127, 180, 66, 20, 48, 160, 47, 118, 47, 57, 20, 160, 80, 64, 47, 116, 7, 20, 48, 160, 47, 106, 57, 20, 58, 160, 61, 57, 47, 58, 20, 59, 160, 47, 139, 62, 67, 60, 20, 66, 160, 67, 64, 55, 65, 20, 59, 161, 47, 60, 66, 135, 47, 60, 87, 96, 160, 47, 64, 47, 8, 2]
+CTC compact IDs: [128000, 45, 10426, 220, 70, 461, 983, 220, 329, 30493, 220, 76, 19818, 276, 220, 75060, 275, 220, 65, 51403]...
+
+================================================================================
+
+Example 4:
+Input: Gunung Merapi kembali mengeluarkan awan panas pada Selasa pagi, warga diminta waspada.
+Output: Gunung Merapi kembali mengeluarkan awan panas pada Selasa pagi, warga diminta Waspada.
+----------------------------------------
+Detailed Log:
+input:   Gunung Merapi kembali mengeluarkan awan panas pada Selasa pagi, warga diminta waspada.
+normalized: Gunung Merapi kembali mengeluarkan awan panas pada Selasa pagi, warga diminta waspada.
+phonemes:   ['ɡˈunuŋ', ' ', 'mərˈapi', ' ', 'kəmbˈali', ' ', 'məŋˌɛluˈarkan', ' ', 'ˈawan', ' ', 'pˈanas', ' ', 'pˌada', ' ', 'səlˈasa', ' ', 'pˈaɡi', ',', ' ', 'wˈarɡa', ' ', 'dimˈinta', ' ', 'waspˈada', '.']
+input ids:  [1, 96, 160, 67, 60, 67, 116, 20, 59, 87, 64, 160, 47, 62, 55, 20, 57, 87, 59, 48, 160, 47, 58, 55, 20, 59, 87, 116, 161, 90, 58, 67, 160, 47, 64, 57, 47, 60, 20, 160, 47, 69, 47, 60, 20, 62, 160, 47, 60, 47, 65, 20, 62, 161, 47, 50, 47, 20, 65, 87, 58, 160, 47, 65, 47, 20, 62, 160, 47, 96, 55, 7, 20, 69, 160, 47, 64, 96, 47, 20, 50, 55, 59, 160, 55, 60, 66, 47, 20, 69, 47, 65, 62, 160, 47, 50, 47, 8, 2]
+CTC compact IDs: [128000, 65007, 2234, 220, 27814, 2113, 220, 74, 69805, 220, 76, 833, 79378, 62986, 220, 42029, 220, 857, 300, 220]...
+
+================================================================================
+
+Example 5:
+Input: Teknologi kecerdasan buatan berkembang sangat pesat dalam beberapa tahun terakhir ini.
+Output: Teknologi keecdasan buatan berkembang sangat pesat dalam beberapa tahun terakhir ini.
+----------------------------------------
+Detailed Log:
+input:   Teknologi kecerdasan buatan berkembang sangat pesat dalam beberapa tahun terakhir ini.
+normalized: Teknologi kecerdasan buatan berkembang sangat pesat dalam beberapa tahun terakhir ini.
+phonemes:   ['tˌɛknolˈoɡi', ' ', 'kətʃərdˈasan', ' ', 'buˈatan', ' ', 'bərkˈɛmbaŋ', ' ', 'sˈaŋat', ' ', 'pˈɛsat', ' ', 'dˈalam', ' ', 'bəbərˈapa', ' ', 'tˈahun', ' ', 'tərˈaxir', ' ', 'ˈini', '.']
+input ids:  [1, 66, 161, 90, 57, 60, 61, 58, 160, 61, 96, 55, 20, 57, 87, 66, 135, 87, 64, 50, 160, 47, 65, 47, 60, 20, 48, 67, 160, 47, 66, 47, 60, 20, 48, 87, 64, 57, 160, 90, 59, 48, 47, 116, 20, 65, 160, 47, 116, 47, 66, 20, 62, 160, 90, 65, 47, 66, 20, 50, 160, 47, 58, 47, 59, 20, 48, 87, 48, 87, 64, 160, 47, 62, 47, 20, 66, 160, 47, 54, 67, 60, 20, 66, 87, 64, 160, 47, 70, 55, 64, 20, 160, 55, 60, 55, 8, 2]
+CTC compact IDs: [128000, 56815, 77, 86735, 220, 441, 762, 35989, 276, 220, 20218, 16623, 220, 655, 74, 9034, 526, 220, 82, 526]...
+
+================================================================================
+
+Example 6:
+Input: User interface-nya sangat user-friendly, tapi backend-nya masih perlu banyak optimasi performa.
+Output: user Interface-nya sangat user-friendlyley, tapi end-nya masih perlu banyak optimasi performa.
+----------------------------------------
+Detailed Log:
+input:   User interface-nya sangat user-friendly, tapi backend-nya masih perlu banyak optimasi performa.
+normalized: User interface-nya sangat user-friendly, tapi backend-nya masih perlu banyak optimasi performa.
+phonemes:   ['jˈuːzɚ', ' ', 'ˈɪntɚfˌeɪs', '-', 'ɲˈa', ' ', 'sˈaŋat', ' ', 'jˈuːzɚ', '-', 'fɹˈɛndli', ',', ' ', 'tˈapi', ' ', 'bækˈɛnd', '-', 'ɲˈa', ' ', 'mˈasih', ' ', 'pˈɛrlu', ' ', 'bˈaɲak', ' ', 'ˌoptimˈasi', ' ', 'pɚfˈoːɹmə', '.']
+input ids:  [1, 56, 160, 67, 162, 72, 89, 20, 160, 106, 60, 66, 89, 52, 161, 51, 106, 65, 3, 118, 160, 47, 20, 65, 160, 47, 116, 47, 66, 20, 56, 160, 67, 162, 72, 89, 3, 52, 127, 160, 90, 60, 50, 58, 55, 7, 20, 66, 160, 47, 62, 55, 20, 48, 76, 57, 160, 90, 60, 50, 3, 118, 160, 47, 20, 59, 160, 47, 65, 55, 54, 20, 62, 160, 90, 64, 58, 67, 20, 48, 160, 47, 118, 47, 57, 20, 161, 61, 62, 66, 55, 59, 160, 47, 65, 55, 20, 62, 89, 52, 160, 61, 162, 127, 59, 87, 8, 2]
+CTC compact IDs: [128000, 882, 220, 5160, 12, 23741, 220, 82, 526, 266, 220, 882, 12, 82630, 3258, 11, 220, 83, 2113, 220]...
+
+================================================================================
+
+Example 7:
+Input: Bapak SBY (Susilo Bambang Yudhoyono) menjabat sebagai presiden RI ke-6 selama dua periode berturut-turut.
+Output: Bapak SBwi (Susilo Bambang Yudhoyono) menjabat sebagai Presiden RI keenam selama dua periode berturut-turut.
+----------------------------------------
+Detailed Log:
+input:   Bapak SBY (Susilo Bambang Yudhoyono) menjabat sebagai presiden RI ke-6 selama dua periode berturut-turut.
+normalized: Bapak SBY (Susilo Bambang Yudhoyono) menjabat sebagai presiden RI keenam selama dua periode berturut-turut.
+phonemes:   ['bˈapak', ' ', 'ˌɛsbˌiːwˈaɪ', ' ', '(', 'susˈilo', ' ', 'bˈambaŋ', ' ', 'jˌudhojˈono', ')', ' ', 'məndʒˈabat', ' ', 'səbˌaɡaɪ', ' ', 'pɹˈɛzɪdən', ' ', 'rˈi', ' ', 'kəˈɛnam', ' ', 'səlˈama', ' ', 'dˈua', ' ', 'pəriˈodə', ' ', 'bərtˈurut', '-', 'tˈurut', '.']
+input ids:  [1, 48, 160, 47, 62, 47, 57, 20, 161, 90, 65, 48, 161, 55, 162, 69, 160, 47, 106, 20, 3, 65, 67, 65, 160, 55, 58, 61, 20, 48, 160, 47, 59, 48, 47, 116, 20, 56, 161, 67, 50, 54, 61, 56, 160, 61, 60, 61, 3, 20, 59, 87, 60, 50, 151, 160, 47, 48, 47, 66, 20, 65, 87, 48, 161, 47, 96, 47, 106, 20, 62, 127, 160, 90, 72, 106, 50, 87, 60, 20, 64, 160, 55, 20, 57, 87, 160, 90, 60, 47, 59, 20, 65, 87, 58, 160, 47, 59, 47, 20, 50, 160, 67, 47, 20, 62, 87, 64, 55, 160, 61, 50, 87, 20, 48, 87, 64, 66, 160, 67, 64, 67, 66, 3, 66, 160, 67, 64, 67, 66, 8, 2]
+CTC compact IDs: [128000, 33, 391, 587, 220, 17094, 17043, 220, 7, 78524, 18536, 220, 33, 3042, 526, 220, 56, 664, 71, 2303]...
+
+================================================================================
+
+Example 8:
+Input: Harga saham gabungan hari ini turun 0,5% menjadi 7.234 poin karena sentimen negatif pasar global.
+Output: H aham Gabungan hari ini turun lima menjadi tujuh ribu dua ratus tiga puluh empat poin karena sentimen negatif Pasar global.
+----------------------------------------
+Detailed Log:
+input:   Harga saham gabungan hari ini turun 0,5% menjadi 7.234 poin karena sentimen negatif pasar global.
+normalized: Harga saham gabungan hari ini turun lima menjadi tujuh ribu dua ratus tiga puluh empat poin karena sentimen negatif pasar global.
+phonemes:   ['hˈarɡa', ' ', 'sˈaham', ' ', 'ɡabˈuŋan', ' ', 'hˈari', ' ', 'ˈini', ' ', 'tˈurun', ' ', 'lˈima', ' ', 'məndʒˈadi', ' ', 'tˈudʒuh', ' ', 'rˈibu', ' ', 'dˈua', ' ', 'rˈatus', ' ', 'tˈiɡa', ' ', 'pˈuluh', ' ', 'ˈɛmpat', ' ', 'pˈɔɪn', ' ', 'karˈɛna', ' ', 'sˈɛntaɪmˌɛn', ' ', 'nˈɛɡɐtˌɪf', ' ', 'pˈasar', ' ', 'ɡlˈobal', '.']
+input ids:  [1, 54, 160, 47, 64, 96, 47, 20, 65, 160, 47, 54, 47, 59, 20, 96, 47, 48, 160, 67, 116, 47, 60, 20, 54, 160, 47, 64, 55, 20, 160, 55, 60, 55, 20, 66, 160, 67, 64, 67, 60, 20, 58, 160, 55, 59, 47, 20, 59, 87, 60, 50, 151, 160, 47, 50, 55, 20, 66, 160, 67, 50, 151, 67, 54, 20, 64, 160, 55, 48, 67, 20, 50, 160, 67, 47, 20, 64, 160, 47, 66, 67, 65, 20, 66, 160, 55, 96, 47, 20, 62, 160, 67, 58, 67, 54, 20, 160, 90, 59, 62, 47, 66, 20, 62, 160, 80, 106, 60, 20, 57, 47, 64, 160, 90, 60, 47, 20, 65, 160, 90, 60, 66, 47, 106, 59, 161, 90, 60, 20, 60, 160, 90, 96, 74, 66, 161, 106, 52, 20, 62, 160, 47, 65, 47, 64, 20, 96, 58, 160, 61, 48, 47, 58, 8, 2]
+CTC compact IDs: [128000, 39, 220, 1494, 309, 220, 75739, 52288, 220, 77007, 220, 6729, 220, 66467, 359, 220, 4763, 64, 220, 5794]...
+
+================================================================================
+
+Example 9:
+Input: Ibu membeli 2,5 kg gula, 500 gram kopi, dan 3 liter minyak goreng seharga Rp125.000 di pasar swalayan.
+Output: Ibu membeli dua koma lima kg gula, lima ratus gram kopi, dan tiga liter minyak goreng seharga Rp seratus dua puluh lima ribu di pasar swalayan.
+----------------------------------------
+Detailed Log:
+input:   Ibu membeli 2,5 kg gula, 500 gram kopi, dan 3 liter minyak goreng seharga Rp125.000 di pasar swalayan.
+normalized: Ibu membeli dua koma lima kg gula, lima ratus gram kopi, dan tiga liter minyak goreng seharga Rp seratus dua puluh lima ribu di pasar swalayan.
+phonemes:   ['ˈibu', ' ', 'məmbˈɛli', ' ', 'dˈua', ' ', 'kˈoma', ' ', 'lˈima', ' ', 'kˌaɡˈe', ' ', 'ɡˈula', ',', ' ', 'lˈima', ' ', 'rˈatus', ' ', 'ɡrˈam', ' ', 'kˈopi', ',', ' ', 'dan', ' ', 'tˈiɡa', ' ', 'lˈitər', ' ', 'mˈiɲak', ' ', 'ɡˈɔrəŋ', ' ', 'səhˈarɡa', ' ', 'ˌɛrpˈe', ' ', 'sərˈatus', ' ', 'dˈua', ' ', 'pˈuluh', ' ', 'lˈima', ' ', 'rˈibu', ' ', 'di', ' ', 'pˈasar', ' ', 'swalˈajan', '.']
+input ids:  [1, 160, 55, 48, 67, 20, 59, 87, 59, 48, 160, 90, 58, 55, 20, 50, 160, 67, 47, 20, 57, 160, 61, 59, 47, 20, 58, 160, 55, 59, 47, 20, 57, 161, 47, 96, 160, 51, 20, 96, 160, 67, 58, 47, 7, 20, 58, 160, 55, 59, 47, 20, 64, 160, 47, 66, 67, 65, 20, 96, 64, 160, 47, 59, 20, 57, 160, 61, 62, 55, 7, 20, 50, 47, 60, 20, 66, 160, 55, 96, 47, 20, 58, 160, 55, 66, 87, 64, 20, 59, 160, 55, 118, 47, 57, 20, 96, 160, 80, 64, 87, 116, 20, 65, 87, 54, 160, 47, 64, 96, 47, 20, 161, 90, 64, 62, 160, 51, 20, 65, 87, 64, 160, 47, 66, 67, 65, 20, 50, 160, 67, 47, 20, 62, 160, 67, 58, 67, 54, 20, 58, 160, 55, 59, 47, 20, 64, 160, 55, 48, 67, 20, 50, 55, 20, 62, 160, 47, 65, 47, 64, 20, 65, 69, 47, 58, 160, 47, 56, 47, 60, 8, 2]
+CTC compact IDs: [128000, 40, 20218, 220, 76, 9034, 12574, 220, 1072, 64, 220, 74, 7942, 220, 4763, 64, 220, 7501, 220, 70]...
+
+================================================================================
+
+Example 10:
+Input: Kakak sedang asyik bermain 'game' di laptop sambil mendengarkan lagu 'heavy metal' menggunakan 'headset'.
+Output: Kakak sedang Asyik bermain 'game' di Laptop sambil mendengarkan lagu 'heavy metal' menggunakan 'Hadsset'.
+----------------------------------------
+Detailed Log:
+input:   Kakak sedang asyik bermain 'game' di laptop sambil mendengarkan lagu 'heavy metal' menggunakan 'headset'.
+normalized: Kakak sedang asyik bermain 'game' di laptop sambil mendengarkan lagu 'heavy metal' menggunakan 'headset'.
+phonemes:   ['kˈakak', ' ', 'sˈɛdaŋ', ' ', 'ˈaçik', ' ', 'bˈɛrmaɪn', ' ', "'", 'ɡˈeɪm', "'", ' ', 'di', ' ', 'lˈæptɑːp', ' ', 'sˈambil', ' ', 'məndəŋˈarkan', ' ', 'lˈaɡu', ' ', "'", 'hˈɛvi', ' ', 'mˈɛɾəl', "'", ' ', 'məŋɡunˈakan', ' ', "'", 'hˈɛdsɛt', "'", '.']
+input ids:  [1, 57, 160, 47, 57, 47, 57, 20, 65, 160, 90, 50, 47, 116, 20, 160, 47, 82, 55, 57, 20, 48, 160, 90, 64, 59, 47, 106, 60, 20, 178, 96, 160, 51, 106, 59, 178, 20, 50, 55, 20, 58, 160, 76, 62, 66, 73, 162, 62, 20, 65, 160, 47, 59, 48, 55, 58, 20, 59, 87, 60, 50, 87, 116, 160, 47, 64, 57, 47, 60, 20, 58, 160, 47, 96, 67, 20, 178, 54, 160, 90, 68, 55, 20, 59, 160, 90, 129, 87, 58, 178, 20, 59, 87, 116, 96, 67, 60, 160, 47, 57, 47, 60, 20, 178, 54, 160, 90, 50, 65, 90, 66, 178, 8, 2]
+CTC compact IDs: [128000, 42, 587, 587, 220, 32424, 526, 220, 2170, 88, 1609, 220, 655, 3902, 220, 6, 5924, 6, 220, 8747]...
+
+================================================================================
+
+Example 11:
+Input: Saya suka makan nasi.
+Output: Saya suka makan nasi.
+----------------------------------------
+Detailed Log:
+input:   Saya suka makan nasi.
+normalized: Saya suka makan nasi.
+phonemes:   ['sˈaja', ' ', 'sˈuka', ' ', 'mˈakan', ' ', 'nˈasi', '.']
+input ids:  [1, 65, 160, 47, 56, 47, 20, 65, 160, 67, 57, 47, 20, 59, 160, 47, 57, 47, 60, 20, 60, 160, 47, 65, 55, 8, 2]
+CTC compact IDs: [128000, 50, 12874, 220, 82, 26261, 220, 76, 19818, 220, 77, 10426, 13, 128009]...
+
+================================================================================
+
+Example 12:
+Input: Buku itu ada di atas meja.
+Output: Buku itu ada di atas meja.
+----------------------------------------
+Detailed Log:
+input:   Buku itu ada di atas meja.
+normalized: Buku itu ada di atas meja.
+phonemes:   ['bˈuku', ' ', 'ˈitu', ' ', 'ˈada', ' ', 'di', ' ', 'ˈatas', ' ', 'mˈɛdʒa', '.']
+input ids:  [1, 48, 160, 67, 57, 67, 20, 160, 55, 66, 67, 20, 160, 47, 50, 47, 20, 50, 55, 20, 160, 47, 66, 47, 65, 20, 59, 160, 90, 50, 151, 47, 8, 2]
+CTC compact IDs: [128000, 33, 36834, 220, 33462, 220, 2649, 220, 8747, 220, 19907, 220, 2727, 5697, 13, 128009]...
+
+================================================================================
+
+Example 13:
+Input: Kucing saya tidur di kursi.
+Output: Kucing saya tidur di kursi.
+----------------------------------------
+Detailed Log:
+input:   Kucing saya tidur di kursi.
+normalized: Kucing saya tidur di kursi.
+phonemes:   ['kˈutʃiŋ', ' ', 'sˈaja', ' ', 'tˈidur', ' ', 'di', ' ', 'kˈursi', '.']
+input ids:  [1, 57, 160, 67, 66, 135, 55, 116, 20, 65, 160, 47, 56, 47, 20, 66, 160, 55, 50, 67, 64, 20, 50, 55, 20, 57, 160, 67, 64, 65, 55, 8, 2]
+CTC compact IDs: [128000, 42, 59144, 220, 82, 12874, 220, 25453, 324, 220, 8747, 220, 74, 1759, 72, 13, 128009]...
+
+================================================================================
+
+Example 14:
+Input: Adik sedang bermain bola di taman.
+Output: Adik sedang bermain bola di Taman.
+----------------------------------------
+Detailed Log:
+input:   Adik sedang bermain bola di taman.
+normalized: Adik sedang bermain bola di taman.
+phonemes:   ['ˈadik', ' ', 'sˈɛdaŋ', ' ', 'bˈɛrmaɪn', ' ', 'bˈola', ' ', 'di', ' ', 'tˈaman', '.']
+input ids:  [1, 160, 47, 50, 55, 57, 20, 65, 160, 90, 50, 47, 116, 20, 48, 160, 90, 64, 59, 47, 106, 60, 20, 48, 160, 61, 58, 47, 20, 50, 55, 20, 66, 160, 47, 59, 47, 60, 8, 2]
+CTC compact IDs: [128000, 2654, 1609, 220, 32424, 526, 220, 655, 3902, 220, 65, 8083, 220, 8747, 220, 51, 13005, 13, 128009]...
+
+================================================================================
+
+Example 15:
+Input: Hari ini cuaca sangat cerah.
+Output: H ini cuaca sangat cerah.
+----------------------------------------
+Detailed Log:
+input:   Hari ini cuaca sangat cerah.
+normalized: Hari ini cuaca sangat cerah.
+phonemes:   ['hˈari', ' ', 'ˈini', ' ', 'tʃuˈatʃa', ' ', 'sˈaŋat', ' ', 'tʃˈɛrah', '.']
+input ids:  [1, 54, 160, 47, 64, 55, 20, 160, 55, 60, 55, 20, 66, 135, 67, 160, 47, 66, 135, 47, 20, 65, 160, 47, 116, 47, 66, 20, 66, 135, 160, 90, 64, 47, 54, 8, 2]
+CTC compact IDs: [128000, 39, 220, 6729, 220, 20811, 17544, 220, 82, 526, 266, 220, 3913, 1494, 13, 128009]...
+
+================================================================================
+
