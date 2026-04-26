@@ -65,38 +65,48 @@ def compute_f1_macro(logits, labels, num_classes_to_consider=50):
     return sum(f1_scores) / len(f1_scores) if f1_scores else 0.0
 
 
+def levenshtein_distance(s1, s2):
+    """Standard Levenshtein distance for WER calculation."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if not s2:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
 def compute_ctc_wer(ctc_logits, ctc_targets, input_lengths, target_lengths):
-    """Compute CTC Word Error Rate (WER)"""
-    # Get predictions via greedy decoding
-    ctc_logits_np = ctc_logits.cpu().detach()
-    
-    # Greedy decode: argmax along vocab dimension, then remove blanks
-    predictions = ctc_logits_np.argmax(dim=-1)  # [B, T]
+    """Compute CTC Word Error Rate (WER) using Levenshtein distance"""
+    predictions = ctc_logits.argmax(dim=-1)  # [B, T]
     
     total_wer_distance = 0
     total_wer_targets = 0
     
     start_idx = 0
-    
     for i in range(len(target_lengths)):
         end_idx = start_idx + target_lengths[i].item()
-        target_seq = ctc_targets[start_idx:end_idx].cpu().numpy()
+        target_seq = ctc_targets[start_idx:end_idx].cpu().tolist()
         
-        # Get prediction for this sample
+        # Greedy decode
         input_len = input_lengths[i].item()
-        pred_seq = predictions[i, :input_len].numpy()
+        pred_seq = predictions[i, :input_len].cpu().tolist()
         
-        # Remove blanks (0) and consecutive duplicates for CTC decoding
         pred_decoded = []
-        for j in range(len(pred_seq)):
-            if pred_seq[j] != 0 and (j == 0 or pred_seq[j] != pred_seq[j-1]):
-                pred_decoded.append(pred_seq[j] - 1)  # Shift back (CTC uses +1)
+        prev_idx = -1
+        for idx in pred_seq:
+            if idx != prev_idx and idx != 0:
+                pred_decoded.append(idx - 1)
+            prev_idx = idx
         
-        pred_decoded = pred_decoded[:len(target_seq)]
- 
-        from difflib import SequenceMatcher
-        matcher = SequenceMatcher(None, pred_decoded, target_seq)
-        distance = len(target_seq) - sum(block.size for block in matcher.get_matching_blocks())
+        # Calculate standard Levenshtein distance
+        distance = levenshtein_distance(pred_decoded, target_seq)
         total_wer_distance += distance
         total_wer_targets += len(target_seq)
         
@@ -242,6 +252,11 @@ def main():
     print(f"Test dataset after filtering: {len(test_dataset)}")
     print()
     
+    # Setting masking to 0 for clean evaluation by default
+    word_mask_prob = 0.0
+    phoneme_mask_prob = 0.0
+    replace_prob = 0.0
+    
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
@@ -249,9 +264,9 @@ def main():
         collate_fn=lambda batch: collate_fn(
             batch, 
             test_dataset.text_cleaner, 
-            word_mask_prob=test_dataset.word_mask_prob,
-            phoneme_mask_prob=test_dataset.phoneme_mask_prob,
-            replace_prob=test_dataset.replace_prob
+            word_mask_prob=word_mask_prob,
+            phoneme_mask_prob=phoneme_mask_prob,
+            replace_prob=replace_prob
         ),
         pin_memory=True
     )

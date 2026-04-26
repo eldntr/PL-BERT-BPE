@@ -1,9 +1,10 @@
 import torch
 import random
 from model import MultiTaskModel
-from text_tokenizer import TextTokenizer
-from phoneme_tokenizer import PhonemeTokenizer
+from text_utils import TextCleaner
 from phonemize import phonemize
+import pickle
+import yaml
 
 def apply_mlm_masking(
     input_ids: torch.Tensor,
@@ -123,37 +124,22 @@ def apply_span_masking(
 
 # ==================== END MLM MASKING ====================
 
-def load_model(checkpoint_path, phoneme_vocab_size, bpe_vocab_size, device="cpu"):
-    """Load model from checkpoint with vocab size detection."""
+def load_model(checkpoint_path, phoneme_vocab_size, bpe_vocab_size, model_params, device="cpu"):
+    """Load model from checkpoint."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["model_state"]
     
     # Handle DDP 'module.' prefix
     new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
     
-    # Detect vocab size from checkpoint
-    ckpt_phoneme_size = new_state_dict["encoder.embeddings.word_embeddings.weight"].shape[0]
-    ckpt_bpe_size = new_state_dict["ctc_head.weight"].shape[0] - 1  # minus blank
-    
-    print(f"⚠️  Checkpoint vocab: phoneme={ckpt_phoneme_size}, bpe={ckpt_bpe_size}")
-    print(f"⚠️  Current vocab:    phoneme={phoneme_vocab_size}, bpe={bpe_vocab_size}")
-    
-    if ckpt_phoneme_size != phoneme_vocab_size:
-        print("❌ PHONEME VOCAB MISMATCH! Model outputs will be garbage.")
-        print("   → Retrain model with new phoneme vocab (includes <s>, </s>, <space>)")
-        
-    if ckpt_bpe_size != bpe_vocab_size:
-        print("❌ BPE VOCAB MISMATCH!")
-        print("   → Ensure bpe_vocab_map.json matches training checkpoint")
-    
     model = MultiTaskModel(
-        phoneme_vocab_size=ckpt_phoneme_size,  # Use checkpoint size
-        bpe_vocab_size=ckpt_bpe_size,
-        hidden_size=512,
-        num_layers=6,
-        num_heads=8,
-        intermediate_size=2048,
-        max_position_embeddings=1024,
+        phoneme_vocab_size=phoneme_vocab_size,
+        bpe_vocab_size=bpe_vocab_size,
+        hidden_size=model_params["hidden_size"],
+        num_layers=model_params["num_hidden_layers"],
+        num_heads=model_params["num_attention_heads"],
+        intermediate_size=model_params["intermediate_size"],
+        max_position_embeddings=model_params["max_position_embeddings"],
     )
             
     model.load_state_dict(new_state_dict)
@@ -161,7 +147,7 @@ def load_model(checkpoint_path, phoneme_vocab_size, bpe_vocab_size, device="cpu"
     model.eval()
     return model
 
-def ctc_decode(logits, text_tokenizer):
+def ctc_decode(logits, llama_tokenizer, id_to_original):
     preds = torch.argmax(logits, dim=-1)[0].tolist()
     
     decoded_ids = []
@@ -170,61 +156,64 @@ def ctc_decode(logits, text_tokenizer):
     # Collapse repeats and remove blanks (index 0)
     for idx in preds:
         if idx != prev_idx and idx != 0:
-            decoded_ids.append(idx - 1)  # Shift back from CTC (blank=0, tokens=1+)
+            compact_id = idx - 1  # Shift back from CTC (blank=0, tokens=1+)
+            # Map compact -> original BPE ID
+            original_id = id_to_original.get(compact_id, compact_id)
+            decoded_ids.append(original_id)
         prev_idx = idx
 
-    print(f"CTC raw indices: {preds}")
-    print(f"CTC compact IDs: {decoded_ids}")
+    print(f"CTC compact IDs: {decoded_ids[:20]}...")
     
-    # Decode compact→original if pruning is used
-    if text_tokenizer.use_pruning:
-        original_ids = [text_tokenizer.compact_to_original.get(cid, text_tokenizer.unk_id) for cid in decoded_ids]
-        print(f"Original IDs:    {original_ids}")  # Debug first 20
-        return text_tokenizer.tokenizer.decode(original_ids, skip_special_tokens=False)
-    else:
-        return text_tokenizer.tokenizer.decode(decoded_ids, skip_special_tokens=False)
+    return llama_tokenizer.decode(decoded_ids, skip_special_tokens=True)
 
-def predict(model, text, phoneme_tokenizer, text_tokenizer, device):
+def predict(model, text, text_cleaner, llama_tokenizer, id_to_original, device):
     print(f"input:   {text}")
 
-    # Phonemize dengan BOS/EOS, spaces, dan punctuation (SAMA SEPERTI TRAINING)
-    ex = phonemize(text, text_tokenizer, phoneme_tokenizer)
+    # Normalize/Phonemize
+    # Note: text_cleaner will be used on the phonemized output
+    # For now, let's assume phonemize(text) returns a dict with 'phonemes' list of phonemes strings
+    # But text_cleaner takes the whole string and returns list of indices.
+    # Looking at dataloader_ctc.py: 
+    # phon_ids_per_word = [self.text_cleaner(p) for p in phoneme_words]
+    # flat_phon = [self.sos_phon] ... flat_phon.extend(phon_ids) ... flat_phon.append(self.eos_phon)
+    
+    ex = phonemize(text, llama_tokenizer)
+
     print(f"normalized: {ex['after']}")
     print(f"phonemes:   {ex['phonemes']}")
 
-    # Tokenize: encode setiap phoneme item, lalu flatten (SAMA SEPERTI TRAINING)
-    flat_phon = []
-    for ph in ex["phonemes"]:
-        ids = phoneme_tokenizer.encode(ph)
+    sos_phon = text_cleaner.word_index_dictionary.get('<sos>', 1)
+    eos_phon = text_cleaner.word_index_dictionary.get('<eos>', 2)
+    pad_id = text_cleaner.word_index_dictionary.get('<pad>', 0)
+
+    flat_phon = [sos_phon]
+    for p in ex["phonemes"]:
+        ids = text_cleaner(p)
         flat_phon.extend(ids)
+    flat_phon.append(eos_phon)
 
     print(f"input ids:  {flat_phon}")
 
     if not flat_phon:
         return ""
     
-    # Filter IDs that exceed vocab size (if old checkpoint)
-    model_vocab_size = 104  # Current vocab size with BOS/EOS/space
-    filtered_ids = [i if i < model_vocab_size else phoneme_tokenizer.blank_id for i in flat_phon]
-    if filtered_ids != flat_phon:
-        print(f"⚠️  Filtered {len([i for i in flat_phon if i >= model_vocab_size])} OOV phonemes (using blank)")
-    
-    input_tensor = torch.tensor([filtered_ids], dtype=torch.long).to(device)
-    attention_mask = (input_tensor != phoneme_tokenizer.pad_id).long()
+    input_tensor = torch.tensor([flat_phon], dtype=torch.long).to(device)
+    attention_mask = (input_tensor != pad_id).long()
 
     # Inference
     with torch.no_grad():
         _, ctc_logits = model(input_tensor, attention_mask=attention_mask)
 
     # Decode
-    return ctc_decode(ctc_logits, text_tokenizer)
+    return ctc_decode(ctc_logits, llama_tokenizer, id_to_original)
 
 
 def predict_with_mlm_masking(
     model,
     text,
-    phoneme_tokenizer,
-    text_tokenizer,
+    text_cleaner,
+    llama_tokenizer,
+    id_to_original,
     device,
     masking_mode="random",
     mlm_prob=0.15,
@@ -237,14 +226,21 @@ def predict_with_mlm_masking(
     print(f"input:   {text}")
     print(f"masking_mode: {masking_mode}, mlm_prob: {mlm_prob}")
 
-    ex = phonemize(text, text_tokenizer, phoneme_tokenizer)
+    ex = phonemize(text, llama_tokenizer, None)
     print(f"normalized: {ex['after']}")
     print(f"phonemes:   {ex['phonemes']}")
 
-    flat_phon = []
+    sos_phon = text_cleaner.word_index_dictionary.get('<sos>', 1)
+    eos_phon = text_cleaner.word_index_dictionary.get('<eos>', 2)
+    pad_id = text_cleaner.word_index_dictionary.get('<pad>', 0)
+    mask_id = text_cleaner.word_index_dictionary.get('<mask>', 4)
+    vocab_size = len(text_cleaner.word_index_dictionary)
+
+    flat_phon = [sos_phon]
     for ph in ex["phonemes"]:
-        ids = phoneme_tokenizer.encode(ph)
+        ids = text_cleaner(ph)
         flat_phon.extend(ids)
+    flat_phon.append(eos_phon)
 
     print(f"input ids:  {flat_phon}")
 
@@ -252,29 +248,23 @@ def predict_with_mlm_masking(
         return ""
 
     input_tensor = torch.tensor([flat_phon], dtype=torch.long).to(device)
-    attention_mask = (input_tensor != phoneme_tokenizer.pad_id).long()
-
-    # Verify mask_id exists
-    if getattr(phoneme_tokenizer, "mask_id", None) is None:
-        print("❌ phoneme_tokenizer.mask_id not found!")
-        print("   Ensure phoneme_vocab.json has <mask> token")
-        return ""
+    attention_mask = (input_tensor != pad_id).long()
 
     # Apply masking
     if masking_mode == "random":
         masked_input, mlm_labels = apply_mlm_masking(
             input_ids=input_tensor,
-            pad_id=phoneme_tokenizer.pad_id,
-            mask_id=phoneme_tokenizer.mask_id,
-            vocab_size=phoneme_tokenizer.vocab_size,
+            pad_id=pad_id,
+            mask_id=mask_id,
+            vocab_size=vocab_size,
             mlm_prob=mlm_prob,
         )
     elif masking_mode == "span":
         masked_input, mlm_labels = apply_span_masking(
             input_ids=input_tensor,
-            pad_id=phoneme_tokenizer.pad_id,
-            mask_id=phoneme_tokenizer.mask_id,
-            vocab_size=phoneme_tokenizer.vocab_size,
+            pad_id=pad_id,
+            mask_id=mask_id,
+            vocab_size=vocab_size,
             mlm_prob=mlm_prob,
             mean_span_len=3,
         )
@@ -307,25 +297,45 @@ def predict_with_mlm_masking(
                 print(f"  pos {idx}: true={true_val}, pred={pred_val}, match={true_val == pred_val}")
 
     # Decode CTC like normal
-    ctc_text = ctc_decode(ctc_logits, text_tokenizer)
-    print(f"CTC output: {ctc_text}")
-    
-    return ctc_text
+    return ctc_decode(ctc_logits, llama_tokenizer, id_to_original)
 
 if __name__ == "__main__":
     # Config
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    CHECKPOINT = "checkpoint_step_600000.pt"
-    PHONEME_VOCAB = "wikipedia-50/phoneme_vocab.json"
-    TEXT_TOKENIZER = "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
-
-    text_tokenizer = TextTokenizer(TEXT_TOKENIZER, map_file="wikipedia-50/bpe_vocab_map.json")
-    phoneme_tokenizer = PhonemeTokenizer.load(PHONEME_VOCAB)
+    CHECKPOINT = "model/checkpoint_step_1000000_final.t7"
+    CONFIG_PATH = "model/config.yml"
     
+    with open(CONFIG_PATH, "r") as f:
+        config = yaml.safe_load(f)
+        
+    dataset_params = config["dataset_params"]
+    model_params = config["model_params"]
+    
+    TOKEN_MAPS = dataset_params.get("token_maps", "token_maps.pkl")
+    TEXT_TOKENIZER = dataset_params.get("tokenizer", "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct")
+
+    from transformers import AutoTokenizer
+    llama_tokenizer = AutoTokenizer.from_pretrained(TEXT_TOKENIZER)
+
+    # Load Token Maps
+    with open(TOKEN_MAPS, 'rb') as f:
+        token_maps = pickle.load(f)
+    
+    # Reverse map: compact_id -> original_id
+    id_to_original = {v['token']: k for k, v in token_maps.items()}
+    
+    text_cleaner = TextCleaner()
+    phoneme_vocab_size = len(text_cleaner.word_index_dictionary)
+    bpe_vocab_size = len(token_maps)
+
+    print(f"Phoneme vocab size: {phoneme_vocab_size}")
+    print(f"BPE vocab size: {bpe_vocab_size}")
+
     model = load_model(
         CHECKPOINT, 
-        phoneme_tokenizer.vocab_size, 
-        len(text_tokenizer), 
+        phoneme_vocab_size, 
+        bpe_vocab_size,
+        model_params,
         device=DEVICE
     )
 
@@ -333,27 +343,8 @@ if __name__ == "__main__":
     print("\n" + "="*80)
     print("MODE 1: Normal CTC Inference")
     print("="*80)
-    text = "aku remen mangan sega goreng ing omah"
-    output = predict(model, text, phoneme_tokenizer, text_tokenizer, DEVICE)
-    print(f"output: {output}")
+    text = "Burung-burung itu berkicau 'cuitt-cuitt' di dahan pohon yang rindang setiap pagi."
+    output = predict(model, text, text_cleaner, llama_tokenizer, id_to_original, DEVICE)
+    print(f"\nFinal output: {output}")
 
-    # ===== Mode 2: MLM with random masking =====
-    print("\n" + "="*80)
-    print("MODE 2: MLM with Random Masking")
-    print("="*80)
-    text = "Kulo mangan sega"
-    output_mlm_random = predict_with_mlm_masking(
-        model, text, phoneme_tokenizer, text_tokenizer, DEVICE,
-        masking_mode="random",
-        mlm_prob=0.15
-    )
-
-    # ===== Mode 3: MLM with span masking =====
-    print("\n" + "="*80)
-    print("MODE 3: MLM with Span Masking")
-    print("="*80)
-    output_mlm_span = predict_with_mlm_masking(
-        model, text, phoneme_tokenizer, text_tokenizer, DEVICE,
-        masking_mode="span",
-        mlm_prob=0.15
-    )
+  
